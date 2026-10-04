@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h1>ผู้อภิปรายในสภา</h1>
+  <p class="muted">{{ people|length|num }} คน · {{ meta[2] }} การประชุม · {{ meta[0]|thaidate }} – {{ meta[1]|thaidate }}</p>
+</section>
+
+<div class="filters">
+  <input id="search" type="search" placeholder="ค้นหาชื่อ / จังหวัด" autocomplete="off">
+  <select id="party">
+    <option value="">ทุกพรรค</option>
+    {% for p in parties %}<option>{{ p }}</option>{% endfor %}
+    <option value="-">ไม่ระบุพรรค</option>
+  </select>
+  <span id="count" class="muted"></span>
+  <span class="muted small hint">คลิกหัวคอลัมน์เพื่อเรียง · คลิกคอลัมน์อื่นต่อเพื่อเรียงซ้อน</span>
+</div>
+
+<div class="table-wrap">
+<table class="people sortable" id="people">
+  <thead>
+    <tr>
+      <th class="r num">#</th>
+      <th data-key="name"><button type="button">ชื่อ</button></th>
+      <th data-key="party"><button type="button">พรรค</button></th>
+      <th data-key="province"><button type="button">จังหวัด</button></th>
+      <th data-key="speeches" data-type="num" class="r"><button type="button">พูด (ครั้ง)</button></th>
+      <th data-key="words" data-type="num" class="r"><button type="button">คำ</button></th>
+      <th data-key="meetings" data-type="num" class="r"><button type="button">ประชุม</button></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in people %}
+    <tr data-search="{{ p.name }} {{ p.province or '' }}" data-name="{{ p.name }}" data-party="{{ p.party or '' }}"
+        data-province="{{ p.province or '' }}" data-speeches="{{ p.speeches }}" data-words="{{ p.words }}"
+        data-meetings="{{ p.meetings }}">
+      <td class="r num muted"></td>
+      <td class="name"><a href="{{ url_for('mp', pid=p.id) }}">{{ p.name }}</a></td>
+      <td>{% if p.party %}<a class="chip" style="{{ chip_style(p.party_color) }}" href="{{ url_for('party', party_id=p.party_id) }}">{{ p.party }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="prov">{{ p.province or '' }}</td>
+      <td class="r">{{ p.speeches|num }}</td>
+      <td class="r">{{ p.words|num }}</td>
+      <td class="r">{{ p.meetings }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const search = document.getElementById('search'), party = document.getElementById('party'),
+        count = document.getElementById('count');
+  const table = SortableTable(document.getElementById('people'), {
+    sort: [{ key: 'words', dir: -1 }],
+    filter: r => {
+      const q = search.value.trim().toLowerCase(), p = party.value;
+      return (!q || r.dataset.search.toLowerCase().includes(q)) &&
+             (!p || r.dataset.party === (p === '-' ? '' : p));
+    },
+    onRender: n => { count.textContent = `${n.toLocaleString()} คน`; },
+  });
+  search.addEventListener('input', table.render);
+  party.addEventListener('change', table.render);
+})();
+</script>
+{% endblock %}

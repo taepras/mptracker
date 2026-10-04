@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}พรรค{{ party.name }} — MP Tracker{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('parties') }}">← พรรคทั้งหมด</a>
+
+<section class="profile party-head" style="{{ chip_style(party.color) }}">
+  <h1><span class="swatch"></span>พรรค{{ party.name }}</h1>
+  {% if party.name_en %}<p class="muted profile-meta">{{ party.name_en }}</p>{% endif %}
+  <dl class="stats">
+    <div><dt>ผู้อภิปราย</dt><dd>{{ stats.members }}</dd></div>
+    <div><dt>ครั้งที่พูด</dt><dd>{{ stats.speeches|num }}</dd>
+         <dd class="sub">{{ (stats.speeches / house.speeches)|pct }} ของสภา</dd></div>
+    <div><dt>จำนวนคำ</dt><dd>{{ stats.words|num }}</dd>
+         <dd class="sub">{{ (stats.words / house.words)|pct }} ของสภา · อันดับ {{ rank }}</dd></div>
+    <div><dt>การประชุมที่ร่วมอภิปราย</dt><dd>{{ stats.meetings }} <span class="sub">/ {{ house.meetings }}</span></dd></div>
+    <div><dt>คำต่อคน</dt><dd>{{ (stats.words / stats.members)|round|int|num }}</dd></div>
+  </dl>
+</section>
+
+<section class="card cloud-card">
+  <div class="card-head">
+    <h2>ประเด็นของพรรค</h2>
+    <div class="seg" role="group" id="cloud-modes">
+      <button data-mode="distinctive" class="on" title="คำที่พรรคนี้ใช้บ่อยกว่าค่าเฉลี่ยของทั้งสภา">คำเด่น</button>
+      <button data-mode="frequent" title="คำที่ใช้บ่อยที่สุด">ใช้บ่อย</button>
+    </div>
+  </div>
+  <div id="cloud" class="cloud" aria-label="word cloud"></div>
+  <p class="muted small">ไม่รวมคำพูดของประธานในที่ประชุม และชื่อบุคคล จังหวัด พรรค · วางเมาส์บนคำเพื่อดูจำนวนครั้ง</p>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>สมาชิกที่อภิปราย <span class="muted">({{ members|length }})</span></h2>
+    <input id="member-search" type="search" placeholder="ค้นหาชื่อ / จังหวัด" autocomplete="off">
+  </div>
+  <div class="table-wrap flush">
+  <table class="people sortable" id="members">
+    <thead>
+      <tr>
+        <th class="r num">#</th>
+        <th data-key="name"><button type="button">ชื่อ</button></th>
+        <th data-key="province"><button type="button">จังหวัด</button></th>
+        <th data-key="speeches" data-type="num" class="r"><button type="button">พูด (ครั้ง)</button></th>
+        <th data-key="words" data-type="num" class="r"><button type="button">คำ</button></th>
+        <th data-key="meetings" data-type="num" class="r"><button type="button">ประชุม</button></th>
+        <th class="share-col"><span class="th-label">สัดส่วนในพรรค</span></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% set top = members[0].words if members else 1 %}
+    {% for m in members %}
+      <tr data-search="{{ m.name }} {{ m.province or '' }}" data-name="{{ m.name }}" data-province="{{ m.province or '' }}"
+          data-speeches="{{ m.speeches }}" data-words="{{ m.words }}" data-meetings="{{ m.meetings }}">
+        <td class="r num muted"></td>
+        <td class="name">
+          <a href="{{ url_for('mp', pid=m.id) }}">{{ m.name }}</a>
+          {% if m.is_presiding %}<span class="badge" title="เคยทำหน้าที่ประธานในที่ประชุม — คำพูดส่วนใหญ่เป็นการดำเนินการประชุม จึงไม่นับในกลุ่มคำของพรรค">ประธานในที่ประชุม</span>{% endif %}
+          {% if m.now_party %}<a class="chip chip-sm" style="{{ chip_style(m.now_party_color) }}"
+             href="{{ url_for('party', party_id=m.now_party_id) }}" title="สังกัดล่าสุด">→ {{ m.now_party }}</a>{% endif %}
+        </td>
+        <td class="prov">{{ m.province or '' }}</td>
+        <td class="r">{{ m.speeches|num }}</td>
+        <td class="r">{{ m.words|num }}</td>
+        <td class="r">{{ m.meetings }}</td>
+        <td class="share-col">
+          <span class="bar" style="--w: {{ (m.words / top * 100)|round(2) }}%; {{ chip_style(party.color) }}"></span>
+          <span class="small">{{ (m.words / stats.words)|pct }}</span>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
+<script src="{{ url_for('static', filename='cloud.js') }}"></script>
+<script>
+  setupCloud(document.getElementById('cloud'), {{ url_for('party_cloud', party_id=party.id, mode='MODE')|tojson }},
+             { controls: document.getElementById('cloud-modes') });
+  (() => {
+    const search = document.getElementById('member-search');
+    const table = SortableTable(document.getElementById('members'), {
+      sort: [{ key: 'words', dir: -1 }],
+      filter: r => { const q = search.value.trim().toLowerCase(); return !q || r.dataset.search.toLowerCase().includes(q); },
+    });
+    search.addEventListener('input', table.render);
+  })();
+</script>
+{% endblock %}

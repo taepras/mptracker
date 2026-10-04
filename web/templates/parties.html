@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}พรรคการเมือง — MP Tracker{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>พรรคการเมือง</h1>
+  <p class="muted">{{ parties|length }} พรรคที่มีสมาชิกอภิปรายในสภา</p>
+</section>
+
+<div class="table-wrap">
+<table class="people sortable" id="parties">
+  <thead>
+    <tr>
+      <th class="r num">#</th>
+      <th data-key="name"><button type="button">พรรค</button></th>
+      <th data-key="members" data-type="num" class="r"><button type="button">ผู้อภิปราย</button></th>
+      <th data-key="speeches" data-type="num" class="r"><button type="button">พูด (ครั้ง)</button></th>
+      <th data-key="words" data-type="num" class="r"><button type="button">คำ</button></th>
+      <th class="share-col"><span class="th-label">สัดส่วนคำในสภา</span></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in parties %}
+    <tr data-name="{{ p.name }}" data-members="{{ p.members }}" data-speeches="{{ p.speeches }}" data-words="{{ p.words }}">
+      <td class="r num muted"></td>
+      <td class="name">
+        <a class="chip" style="{{ chip_style(p.color) }}" href="{{ url_for('party', party_id=p.id) }}">{{ p.name }}</a>
+        {% if p.name_en %}<span class="muted small">{{ p.name_en }}</span>{% endif %}
+      </td>
+      <td class="r">{{ p.members }}</td>
+      <td class="r">{{ p.speeches|num }}</td>
+      <td class="r">{{ p.words|num }}</td>
+      <td class="share-col">
+        {% set share = p.words / total_words %}
+        <span class="bar" style="--w: {{ (share * 100)|round(2) }}%; {{ chip_style(p.color) }}"></span>
+        <span class="small">{{ share|pct }}</span>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  SortableTable(document.getElementById('parties'), { sort: [{ key: 'words', dir: -1 }] });
+</script>
+{% endblock %}

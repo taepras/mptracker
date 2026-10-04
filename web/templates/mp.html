@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ person.name }} — MP Tracker{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('index') }}">← รายชื่อทั้งหมด</a>
+
+<section class="profile">
+  <h1>{{ person.name }}</h1>
+  <div class="profile-meta">
+    {% for p in parties %}
+      <a class="chip{% if not loop.first %} chip-old{% endif %}" style="{{ chip_style(p.color) }}"
+         href="{{ url_for('party', party_id=p.id) }}"
+         title="{{ p.n }} ครั้ง, ล่าสุด {{ p.last|thaidate }}">{{ p.name }}</a>
+    {% endfor %}
+    {% if province %}<span class="muted">{{ province }}</span>{% endif %}
+    {% if person.is_presiding %}<span class="badge" title="เคยทำหน้าที่ประธานในที่ประชุม — คำพูดส่วนใหญ่เป็นการดำเนินการประชุม จึงไม่นับในกลุ่มคำของพรรค">ประธานในที่ประชุม</span>{% endif %}
+  </div>
+  {% if roles %}
+  <ul class="roles">
+    {% for r in roles %}<li>{{ r }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if aliases %}<p class="muted small aliases">ชื่อที่พบในบันทึก: {{ aliases|join(' · ') }}</p>{% endif %}
+  <dl class="stats">
+    <div><dt>ครั้งที่พูด</dt><dd>{{ stats.speeches|num }}</dd></div>
+    <div><dt>จำนวนคำ</dt><dd>{{ stats.words|num }}</dd></div>
+    <div><dt>การประชุม</dt><dd>{{ stats.meetings }}</dd></div>
+    <div><dt>ช่วงเวลา</dt><dd class="small">{{ stats.first|thaidate }} – {{ stats.last|thaidate }}</dd></div>
+  </dl>
+</section>
+
+<section class="card cloud-card">
+  <div class="card-head">
+    <h2>ประเด็นที่พูดถึง</h2>
+    <div class="seg" role="group" id="cloud-modes">
+      <button data-mode="distinctive" class="on" title="คำที่คนนี้ใช้บ่อยกว่าผู้อภิปรายคนอื่น">คำเด่น</button>
+      <button data-mode="frequent" title="คำที่ใช้บ่อยที่สุด">ใช้บ่อย</button>
+    </div>
+  </div>
+  <div id="cloud" class="cloud" aria-label="word cloud"></div>
+  <p class="muted small">คลิกคำเพื่อดูการอภิปรายที่มีคำนั้น</p>
+</section>
+
+<section class="card" id="speeches">
+  <div class="card-head">
+    <h2>การอภิปราย <span class="muted" id="sp-total">({{ stats.speeches|num }})</span></h2>
+  </div>
+  <form class="filters" id="sp-form">
+    <input type="search" id="sp-q" placeholder="ค้นหาในคำอภิปราย">
+    <select id="sp-meeting"><option value="">ทุกการประชุม</option></select>
+    <button type="submit">ค้นหา</button>
+    <a href="#speeches" id="sp-clear" hidden>ล้าง</a>
+  </form>
+  <ol class="speeches" id="sp-list"><li class="muted">กำลังโหลด…</li></ol>
+  <nav class="pager" id="sp-pager" hidden></nav>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
+<script src="{{ url_for('static', filename='cloud.js') }}"></script>
+<script src="{{ url_for('static', filename='speeches.js') }}"></script>
+<script>
+  const speeches = setupSpeeches(document.getElementById('speeches'),
+                                 {{ url_for('mp_speeches', pid=person.id)|tojson }});
+  setupCloud(document.getElementById('cloud'), {{ url_for('mp_cloud', pid=person.id, mode='MODE')|tojson }}, {
+    controls: document.getElementById('cloud-modes'),
+    onClick: word => speeches.search(word),
+  });
+</script>
+{% endblock %}
