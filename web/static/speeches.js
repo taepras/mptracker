@@ -88,8 +88,8 @@
     qInput.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 200); });
     form.addEventListener('submit', e => { e.preventDefault(); run(); });
     meetingSel.addEventListener('change', () => { state.meeting = meetingSel.value; state.page = 1; render(); });
-    // These are #speeches links; handle them here so they don't add history entries (the "← ย้อนกลับ" link and the
-    // browser's Back button should leave the page, not undo a jump within it).
+    // The pager links point at #speeches; handle them here so they don't add history entries (the "← ย้อนกลับ" link
+    // and the browser's Back button should leave the page, not undo a jump within it). ล้าง is a button.
     clear.addEventListener('click', e => {
       e.preventDefault(); state.q = ''; state.meeting = ''; state.page = 1; render(); root.scrollIntoView();
     });

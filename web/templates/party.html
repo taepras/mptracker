@@ -53,6 +53,7 @@
   </div>
   <div class="filters">
     <input id="member-search" type="search" placeholder="ค้นหาชื่อ / จังหวัด" autocomplete="off">
+    <button type="button" id="member-clear" class="filter-clear" hidden>ล้าง</button>
   </div>
   </div>
   <div class="table-wrap">
@@ -135,7 +136,13 @@
       sort: [{ key: 'words', dir: -1 }],
       filter: r => { const q = search.value.trim().toLowerCase(); return !q || r.dataset.search.toLowerCase().includes(q); },
     });
-    search.addEventListener('input', () => { PageState.set('q', search.value); table.render(); });
+    const clear = document.getElementById('member-clear');
+    const showClear = () => { clear.hidden = !search.value.trim(); };
+    search.addEventListener('input', () => { PageState.set('q', search.value); showClear(); table.render(); });
+    clear.addEventListener('click', () => {
+      search.value = ''; PageState.set('q', ''); showClear(); table.render(); search.focus();
+    });
+    showClear();
     PageState.restoreScroll();
   })();
 </script>
