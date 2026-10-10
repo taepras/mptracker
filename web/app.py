@@ -6,18 +6,20 @@ Run:  .venv/bin/python web/app.py   then open http://127.0.0.1:5000
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
 import sqlite3
 import sys
 from pathlib import Path
 
-from flask import Flask, abort, g, jsonify, render_template
+from flask import Flask, abort, g, jsonify, render_template, url_for
 from markupsafe import Markup, escape
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-from names import TITLES, strip_titles  # noqa: E402
+sys.path.insert(0, str(ROOT / "pipeline"))
+from names import TITLES, display_name, strip_titles  # noqa: E402
 
 DB_PATH = ROOT / "mptracker.db"
 CLOUD_TERM_RE = re.compile(r"^[ก-๏A-Za-z][ก-๏A-Za-z0-9 .]*$")
@@ -67,15 +69,28 @@ def load_word_stats() -> dict:
 # ───────────────────────────────────────────────────────────── template helpers
 
 
-def chip_style(color: str | None) -> str:
-    """CSS vars for a party tag: party colour background, black/white text for contrast."""
+def text_on(color: str | None) -> str | None:
+    """Black or white, whichever contrasts more with a #RRGGBB background (None if the colour is unusable)."""
     if not color or not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
-        return ""
+        return None
     r, g_, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
     lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (r, g_, b)]
     lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
-    fg = "#111111" if lum > 0.179 else "#ffffff"  # whichever of black/white contrasts more
-    return f"--pc: {color}; --pf: {fg}"
+    return "#111111" if lum > 0.179 else "#ffffff"
+
+
+def chip_style(color: str | None) -> str:
+    """CSS vars for a party tag: party colour background, black/white text for contrast."""
+    fg = text_on(color)
+    return f"--pc: {color}; --pf: {fg}" if fg else ""
+
+
+BUBBLE_TOP = 200
+
+
+def bubble(label: str, words: int, color: str | None, url: str | None = None, **extra) -> dict:
+    return {"label": label, "value": words or 0, "color": color if text_on(color) else None,
+            "fg": text_on(color), "url": url, **extra}
 
 
 @app.template_filter("num")
@@ -108,7 +123,26 @@ def highlight(text: str, q: str | None) -> Markup:
     return Markup(out)
 
 
-app.jinja_env.globals.update(chip_style=chip_style, highlight=highlight, TITLES=TITLES)
+def _load_logos() -> dict[str, str]:
+    """party name → file under static/logos/ (the "logo" field in pipeline/party_colors.json)."""
+    try:
+        parties = json.loads((ROOT / "pipeline" / "party_colors.json").read_text(encoding="utf-8"))["parties"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    return {name: p["logo"] for name, p in parties.items() if p.get("logo") and (LOGO_DIR / p["logo"]).exists()}
+
+
+LOGO_DIR = ROOT / "web" / "static" / "logos"
+LOGOS = _load_logos()
+
+
+def party_logo(name: str | None) -> str | None:
+    f = LOGOS.get(name or "")
+    return url_for("static", filename=f"logos/{f}") if f else None
+
+
+app.jinja_env.globals.update(chip_style=chip_style, highlight=highlight, TITLES=TITLES, party_logo=party_logo)
+app.add_template_filter(display_name, "dname")
 
 # Each person's party/province from their most recent speech that has a party.
 LATEST_PARTY_CTE = """
@@ -119,6 +153,22 @@ LATEST_PARTY_CTE = """
 
 
 # ───────────────────────────────────────────────────────────── pages
+
+
+_person_totals: dict[int, tuple[int, int, int]] = {}
+
+
+def person_ranks(conn: sqlite3.Connection, pid: int) -> dict[str, int]:
+    """1-based rank of a person among all speakers by speeches / words / meetings (totals cached per process)."""
+    if not _person_totals:
+        _person_totals.update({r[0]: tuple(r[1:]) for r in conn.execute(
+            """SELECT person_id, COUNT(*), SUM(word_count), COUNT(DISTINCT meeting_id)
+               FROM speeches WHERE person_id IS NOT NULL GROUP BY person_id""")})
+    mine = _person_totals.get(pid)
+    if not mine:
+        return {}
+    return {k: 1 + sum(1 for t in _person_totals.values() if t[i] > mine[i])
+            for i, k in enumerate(("speeches", "words", "meetings"))}
 
 
 def person_roles(conn: sqlite3.Connection, pid: int) -> list[str]:
@@ -152,7 +202,21 @@ def index():
             ORDER BY st.words DESC""").fetchall()
     parties = sorted({r["party"] for r in rows if r["party"]})
     meta = db().execute("SELECT MIN(meeting_date), MAX(meeting_date), COUNT(*) FROM meetings").fetchone()
-    return render_template("index.html", people=rows, parties=parties, meta=meta)
+    # Bubbles are grouped by (latest) party: the top people individually, everyone else as one "อื่นๆ" per party.
+    def group(r) -> dict:
+        return {"group": r["party"] or "ไม่ระบุพรรค", "group_color": r["party_color"] if text_on(r["party_color"]) else None,
+                "group_url": url_for("party", party_id=r["party_id"]) if r["party_id"] else None}
+
+    bubbles = [bubble(display_name(r["name"]), r["words"], r["party_color"], url_for("mp", pid=r["id"]), sub=f"{r['words']:,} คำ", **group(r))
+               for r in rows[:BUBBLE_TOP]]
+    rest: dict = {}
+    for r in rows[BUBBLE_TOP:]:
+        rest.setdefault(r["party_id"], []).append(r)
+    for rs in rest.values():
+        words = sum(r["words"] for r in rs)
+        bubbles.append(bubble("อื่นๆ", words, None, sub=f"{words:,} คำ", **group(rs[0])))
+    return render_template("index.html", people=rows, parties=parties, meta=meta, bubbles=bubbles,
+                           bubble_top=min(BUBBLE_TOP, len(rows)))
 
 
 @app.route("/mp/<int:pid>/")
@@ -162,8 +226,6 @@ def mp(pid: int):
     if not person:
         abort(404)
     roles = person_roles(conn, pid)
-    aliases = [r[0] for r in conn.execute(
-        "SELECT alias FROM person_aliases WHERE person_id=? AND alias<>? ORDER BY alias", (pid, person["name"]))]
     stats = conn.execute(
         """SELECT COUNT(*) AS speeches, SUM(s.word_count) AS words, COUNT(DISTINCT s.meeting_id) AS meetings,
                   MIN(m.meeting_date) AS first, MAX(m.meeting_date) AS last
@@ -176,7 +238,11 @@ def mp(pid: int):
         """SELECT province FROM speeches WHERE person_id=? AND province IS NOT NULL
            GROUP BY province ORDER BY COUNT(*) DESC LIMIT 1""", (pid,)).fetchone()
 
-    return render_template("mp.html", person=person, roles=roles, aliases=aliases, stats=stats, parties=parties,
+    total_meetings = conn.execute(
+        "SELECT COUNT(DISTINCT meeting_id) FROM speeches WHERE person_id IS NOT NULL").fetchone()[0]
+    return render_template("mp.html", person=person, roles=roles, stats=stats, parties=parties,
+                           total_meetings=total_meetings,
+                           ranks=person_ranks(conn, pid),
                            province=province[0] if province else None)
 
 
@@ -199,17 +265,39 @@ def parties():
     conn = db()
     total_words = conn.execute("SELECT SUM(word_count) FROM speeches WHERE person_id IS NOT NULL").fetchone()[0]
     rows = conn.execute(
-        """SELECT pa.id, pa.name, pa.name_en, pa.color, COUNT(DISTINCT s.person_id) AS members, COUNT(*) AS speeches,
+        """SELECT pa.id, pa.name, pa.color, COUNT(DISTINCT s.person_id) AS members, COUNT(*) AS speeches,
                   SUM(s.word_count) AS words, COUNT(DISTINCT s.meeting_id) AS meetings
            FROM parties pa JOIN speeches s ON s.party_id = pa.id
            GROUP BY pa.id ORDER BY words DESC""").fetchall()
-    return render_template("parties.html", parties=rows, total_words=total_words)
+    bubbles = [bubble(r["name"], r["words"], r["color"], url_for("party", party_id=r["id"]),
+                      sub=f"{r['words']:,} คำ") for r in rows]
+    return render_template("parties.html", parties=rows, total_words=total_words, bubbles=bubbles)
+
+
+def party_ranks(conn: sqlite3.Connection, party_id: int) -> dict[str, dict[str, int]]:
+    """Where a party stands among all parties on each stat shown on its page (same definitions as the page):
+    {stat: {"rank": 1-based, parties with the same value share it, "of": number of parties,
+            "tied": parties with this very value, itself included}}."""
+    rows = conn.execute(
+        """SELECT party_id, COUNT(*) AS speeches, SUM(word_count) AS words,
+                  COUNT(DISTINCT meeting_id) AS meetings, COUNT(DISTINCT person_id) AS members
+           FROM speeches WHERE party_id IS NOT NULL GROUP BY party_id""").fetchall()
+    mine = next((r for r in rows if r["party_id"] == party_id), None)
+    if mine is None:
+        return {}
+    stats = {"speeches": lambda r: r["speeches"], "words": lambda r: r["words"], "meetings": lambda r: r["meetings"],
+             "words_per_member": lambda r: round(r["words"] / r["members"])}  # rounded as displayed, so ties match
+    ranks = {}
+    for name, value in stats.items():
+        values, own = [value(r) for r in rows], value(mine)
+        ranks[name] = {"rank": 1 + sum(v > own for v in values), "of": len(values), "tied": sum(v == own for v in values)}
+    return ranks
 
 
 @app.route("/party/<int:party_id>/")
 def party(party_id: int):
     conn = db()
-    p = conn.execute("SELECT id, name, name_en, color FROM parties WHERE id=?", (party_id,)).fetchone()
+    p = conn.execute("SELECT id, name, color FROM parties WHERE id=?", (party_id,)).fetchone()
     if not p:
         abort(404)
     stats = conn.execute(
@@ -219,9 +307,6 @@ def party(party_id: int):
     house = conn.execute(
         "SELECT COUNT(*) AS speeches, SUM(word_count) AS words, COUNT(DISTINCT meeting_id) AS meetings "
         "FROM speeches WHERE person_id IS NOT NULL").fetchone()
-    rank = conn.execute(
-        """SELECT COUNT(*) + 1 FROM (SELECT party_id, SUM(word_count) AS w FROM speeches
-           WHERE party_id IS NOT NULL GROUP BY party_id) WHERE w > ?""", (stats["words"] or 0,)).fetchone()[0]
     members = conn.execute(
         f"""WITH {LATEST_PARTY_CTE.strip()},
             here AS (
@@ -237,7 +322,11 @@ def party(party_id: int):
             FROM here h JOIN persons p ON p.id = h.person_id
             LEFT JOIN latest l ON l.person_id = h.person_id AND l.rn = 1
             ORDER BY h.words DESC""", (party_id, party_id, party_id, party_id)).fetchall()
-    return render_template("party.html", party=p, stats=stats, house=house, rank=rank, members=members)
+    # one bubble per speaker, area = words spoken for this party, in the party's colour
+    bubbles = [bubble(m["name"], m["words"], p["color"], url_for("mp", pid=m["id"]), sub=f"{m['words']:,} คำ")
+               for m in members]
+    return render_template("party.html", party=p, stats=stats, house=house, ranks=party_ranks(conn, party_id),
+                           members=members, bubbles=bubbles)
 
 
 # ───────────────────────────────────────────────────────────── word-cloud APIs
@@ -311,12 +400,18 @@ def party_cloud(party_id: int, mode: str):
     return jsonify([list(x) for x in scored[:120]])
 
 
+RELOAD = "--no-reload" not in sys.argv  # hot reload: restarts on .py edits, templates re-read per request
+
+
 def main() -> None:
     if not DB_PATH.exists():
         sys.exit(f"{DB_PATH} not found — run build_db.py first.")
-    print("Loading word statistics ...", flush=True)
-    app.config["WORD_STATS"] = load_word_stats()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # The reloader re-runs this script in a child process; only the child serves, so only it loads the stats.
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not RELOAD:
+        print("Loading word statistics ...", flush=True)
+        app.config["WORD_STATS"] = load_word_stats()
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=RELOAD)
 
 
 if __name__ == "__main__":

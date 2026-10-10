@@ -4,7 +4,7 @@ __pycache__/
 *.py[cod]
 
 # Generated data — rebuild with the pipeline:
-#   scrape_transcripts.py -> data/   build_db.py -> mptracker.db   export_site.py -> dist/
+#   pipeline/scrape_transcripts.py -> data/   pipeline/build_db.py -> mptracker.db   pipeline/export_site.py -> dist/
 data/
 mptracker.db
 mptracker.db-wal

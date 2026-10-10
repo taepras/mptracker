@@ -58,6 +58,47 @@ def strip_titles(name: str) -> str:
     return s
 
 
+_STEM_ABBR = {
+    "พล": "พล.", "พัน": "พ.", "ร้อย": "ร.", "จ่าสิบ": "จ.ส.", "สิบ": "ส.",
+    "พลตำรวจ": "พล.ต.", "พันตำรวจ": "พ.ต.", "ร้อยตำรวจ": "ร.ต.", "จ่าสิบตำรวจ": "จ.ส.ต.", "สิบตำรวจ": "ส.ต.",
+    "พลเรือ": "พล.ร.", "นาวา": "น.", "เรือ": "ร.", "พันจ่า": "พ.จ.", "จ่า": "จ.",
+    "พลอากาศ": "พล.อ.", "นาวาอากาศ": "น.", "เรืออากาศ": "ร.", "พันจ่าอากาศ": "พ.จ.", "จ่าอากาศ": "จ.",
+}
+_LEVEL_ABBR = {"เอก": "อ.", "โท": "ท.", "ตรี": "ต."}
+TITLE_ABBR = {
+    **{s + lv + f: _STEM_ABBR[s] + _LEVEL_ABBR[lv] + f for s in _RANK_STEMS for lv in _LEVELS for f in ("หญิง", "")},
+    "ดาบตำรวจ": "ด.ต.",
+    "ศาสตราจารย์พิเศษ": "ศ.พิเศษ", "ศาสตราจารย์": "ศ.", "รองศาสตราจารย์": "รศ.", "ผู้ช่วยศาสตราจารย์": "ผศ.",
+    "นายแพทย์": "นพ.", "แพทย์หญิง": "พญ.", "ทันตแพทย์": "ทพ.", "ทันตแพทย์หญิง": "ทพญ.",
+    "เภสัชกร": "ภก.", "เภสัชกรหญิง": "ภกญ.", "สัตวแพทย์": "สพ.", "สัตวแพทย์หญิง": "สพญ.",
+    "หม่อมราชวงศ์": "ม.ร.ว.", "หม่อมหลวง": "ม.ล.", "หม่อมเจ้า": "ม.จ.",
+}
+_DROP_TITLES = {*BASIC, "ท่าน"}
+
+
+def display_name(name: str) -> str:
+    """Short display form: นาย/นาง/นางสาว (and ท่าน) dropped, other titles abbreviated
+    ("รองศาสตราจารย์อนุสรณ์ ธรรมใจ" -> "รศ. อนุสรณ์ ธรรมใจ", "พลตำรวจโท X Y" -> "พล.ต.ท. X Y").
+    Follows strip_titles' rules for which leading words count as titles."""
+    s, prev, kept, spaced = name.strip(), None, [], False
+    for _ in range(4):
+        m = _TITLE_RE.match(s)
+        if not m:
+            break
+        title = m.group(0).strip()
+        # "ว่าที่ร้อยตรี นายX": a plain title set off by a space still goes; glued on ("ดร.นายก") it is part of a name
+        if prev is not None and title in BASIC and title != prev and not spaced:
+            break
+        spaced = m.group(0) != title
+        rest = s[m.end():].strip()
+        if len(rest.replace(" ", "")) < 2:
+            break
+        if title not in _DROP_TITLES:
+            kept.append(TITLE_ABBR.get(title, title))
+        s, prev = rest, title
+    return " ".join([*kept, s])
+
+
 def _basic_clean(raw: str) -> str:
     s = re.sub(r"\s+", " ", raw or "").strip()
     s = s.replace(" - ", " ")

@@ -6,26 +6,27 @@
   <title>{% block title %}MP Tracker{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <a class="brand" href="{{ url_for('index') }}">MP Tracker<span>สภาผู้แทนราษฎร</span></a>
+      <a class="brand" href="{{ url_for('index') }}">MP Tracker</a>
       <nav class="nav">
         <a href="{{ url_for('index') }}" {% if request.endpoint in ('index', 'mp') %}aria-current="page"{% endif %}>ผู้อภิปราย</a>
         <a href="{{ url_for('parties') }}" {% if request.endpoint in ('parties', 'party') %}aria-current="page"{% endif %}>พรรค</a>
       </nav>
+      <p class="nav-note">
+        ข้อมูลจาก <a href="https://asrs.parliament.go.th" target="_blank" rel="noopener">asrs.parliament.go.th</a> ซึ่งถอดความด้วย AI อาจมีข้อผิดพลาด
+      </p>
     </div>
   </header>
   <main class="wrap">
     {% block content %}{% endblock %}
   </main>
-  <footer class="wrap footer">
-    ข้อมูลจากระบบสืบค้นวีดิโอการอภิปราย asrs.parliament.go.th — ถอดความด้วยระบบปัญญาประดิษฐ์ อาจมีข้อผิดพลาด
-  </footer>
   <script>window.TITLES = {{ TITLES|tojson }};</script>
+  <script src="{{ url_for('static', filename='page-state.js') }}"></script>
   <script src="{{ url_for('static', filename='table-sort.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

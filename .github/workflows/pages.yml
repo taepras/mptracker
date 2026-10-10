@@ -1,7 +1,7 @@
 # Build the static site and publish it to GitHub Pages on every push to main.
 #
 # The database isn't in git (too big). It lives as a gzipped asset on the GitHub Release
-# tagged "data" — upload a new one with scripts/publish_db.sh after scraping + build_db.py.
+# tagged "data" — upload a new one with pipeline/publish_db.sh after scraping + build_db.py.
 # Run this workflow by hand (Actions tab → "Publish site" → Run workflow) to redeploy after a data update.
 
 name: Publish site
@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      # export_site.py only needs the web app (Flask); scraping/tokenizing deps aren't required
+      # pipeline/export_site.py only needs the web app (Flask); scraping/tokenizing deps aren't required
       - run: pip install "flask>=3.0"
 
       - name: Download database from the "data" release
@@ -42,7 +42,7 @@ jobs:
 
       - name: Export static site
         # Project sites are served from https://<user>.github.io/<repo>/
-        run: python export_site.py --base "/${{ github.event.repository.name }}"
+        run: python pipeline/export_site.py --base "/${{ github.event.repository.name }}"
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,0 +1,8 @@
+# Phrases forced into the lexicon (one per line, '#' starts a comment).
+ปลาหมอคางดำ                 # invasive fish species
+องค์การบริหารส่วนตำบล
+องค์การบริหารส่วนจังหวัด
+โยธาธิการ
+กรมโยธาธิการและผังเมือง
+เอเชียตะวันออกเฉียงใต้
+ดำเนินการ

@@ -1,10 +1,22 @@
 {% extends "base.html" %}
+{% from "_macros.html" import party_icon %}
 {% block content %}
+<div class="split">
+<aside class="split-chart">
 <section class="hero">
   <h1>ผู้อภิปรายในสภา</h1>
   <p class="muted">{{ people|length|num }} คน · {{ meta[2] }} การประชุม · {{ meta[0]|thaidate }} – {{ meta[1]|thaidate }}</p>
 </section>
+<section class="bubble-card">
+  <div class="bubbles" id="bubbles"></div>
+  <script type="application/json" id="bubble-data">{{ bubbles|tojson }}</script>
+  <p class="muted small bubble-note">พื้นที่ฟอง = จำนวนคำ</p>
+</section>
+</aside>
+<div class="split-list">
 
+<div class="list-head">
+<div class="list-title" aria-hidden="true">ผู้อภิปรายในสภา</div>
 <div class="filters">
   <input id="search" type="search" placeholder="ค้นหาชื่อ / จังหวัด" autocomplete="off">
   <select id="party">
@@ -12,8 +24,9 @@
     {% for p in parties %}<option>{{ p }}</option>{% endfor %}
     <option value="-">ไม่ระบุพรรค</option>
   </select>
-  <span id="count" class="muted"></span>
-  <span class="muted small hint">คลิกหัวคอลัมน์เพื่อเรียง · คลิกคอลัมน์อื่นต่อเพื่อเรียงซ้อน</span>
+  <button type="button" id="filter-clear" hidden>ล้างตัวกรอง</button>
+  <!-- <span class="muted small hint">คลิกหัวคอลัมน์เพื่อเรียง · คลิกคอลัมน์อื่นต่อเพื่อเรียงซ้อน</span> -->
+</div>
 </div>
 
 <div class="table-wrap">
@@ -21,9 +34,11 @@
   <thead>
     <tr>
       <th class="r num">#</th>
-      <th data-key="name"><button type="button">ชื่อ</button></th>
-      <th data-key="party"><button type="button">พรรค</button></th>
-      <th data-key="province"><button type="button">จังหวัด</button></th>
+      <th class="multi-head">
+        <button type="button" data-key="name">ชื่อ</button>
+        <button type="button" data-key="party">พรรค</button>
+        <button type="button" data-key="province">จังหวัด</button>
+      </th>
       <th data-key="speeches" data-type="num" class="r"><button type="button">พูด (ครั้ง)</button></th>
       <th data-key="words" data-type="num" class="r"><button type="button">คำ</button></th>
       <th data-key="meetings" data-type="num" class="r"><button type="button">ประชุม</button></th>
@@ -35,9 +50,18 @@
         data-province="{{ p.province or '' }}" data-speeches="{{ p.speeches }}" data-words="{{ p.words }}"
         data-meetings="{{ p.meetings }}">
       <td class="r num muted"></td>
-      <td class="name"><a href="{{ url_for('mp', pid=p.id) }}">{{ p.name }}</a></td>
-      <td>{% if p.party %}<a class="chip" style="{{ chip_style(p.party_color) }}" href="{{ url_for('party', party_id=p.party_id) }}">{{ p.party }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td class="prov">{{ p.province or '' }}</td>
+      <td class="name">
+        <div class="person">
+          {{ party_icon(p.party, p.party_color, p.party_id) }}
+          <div>
+            <a class="row-link" href="{{ url_for('mp', pid=p.id) }}">{{ p.name|dname }}</a>
+            <div class="person-sub muted small">
+              {%- if not p.party and not p.province %}ไม่ทราบสังกัด
+              {%- else %}สส.{% if p.province %} {{ 'บัญชีรายชื่อ' if p.province == 'แบบบัญชีรายชื่อ' else p.province }}{% endif %}
+              {%- if p.party %} <a class="party-link" href="{{ url_for('party', party_id=p.party_id) }}">พรรค{{ p.party }}</a>{% endif %}{% endif %}</div>
+          </div>
+        </div>
+      </td>
       <td class="r">{{ p.speeches|num }}</td>
       <td class="r">{{ p.words|num }}</td>
       <td class="r">{{ p.meetings }}</td>
@@ -46,13 +70,21 @@
   </tbody>
 </table>
 </div>
+</div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="{{ url_for('static', filename='bubbles.js') }}"></script>
 <script>
 (() => {
-  const search = document.getElementById('search'), party = document.getElementById('party'),
-        count = document.getElementById('count');
+  const search = document.getElementById('search'), party = document.getElementById('party');
+  search.value = PageState.get('q', '');
+  const savedParty = PageState.get('party', '');
+  if ([...party.options].some(o => o.value === savedParty || o.text === savedParty)) party.value = savedParty;
+  const clear = document.getElementById('filter-clear');
+  const showClear = () => { clear.hidden = !search.value.trim() && !party.value; };
   const table = SortableTable(document.getElementById('people'), {
     sort: [{ key: 'words', dir: -1 }],
     filter: r => {
@@ -60,10 +92,16 @@
       return (!q || r.dataset.search.toLowerCase().includes(q)) &&
              (!p || r.dataset.party === (p === '-' ? '' : p));
     },
-    onRender: n => { count.textContent = `${n.toLocaleString()} คน`; },
   });
-  search.addEventListener('input', table.render);
-  party.addEventListener('change', table.render);
+  search.addEventListener('input', () => { PageState.set('q', search.value); showClear(); table.render(); });
+  party.addEventListener('change', () => { PageState.set('party', party.value); showClear(); table.render(); });
+  clear.addEventListener('click', () => {
+    search.value = ''; party.value = '';
+    PageState.set('q', ''); PageState.set('party', '');
+    showClear(); table.render(); search.focus();
+  });
+  showClear();
+  PageState.restoreScroll();
 })();
 </script>
 {% endblock %}

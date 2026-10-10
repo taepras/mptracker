@@ -1,46 +1,69 @@
 {% extends "base.html" %}
+{% from "_macros.html" import party_icon %}
 {% block title %}พรรค{{ party.name }} — MP Tracker{% endblock %}
+{% macro rank_note(r) -%}
+  {%- if r %}<dd class="sub">อันดับ {{ r.rank }} {% if r.tied > 1 %}ร่วม {% endif %} / {{ r.of }}</dd>{% endif -%}
+{%- endmacro %}
 {% block content %}
-<a class="back" href="{{ url_for('parties') }}">← พรรคทั้งหมด</a>
+<div class="split">
+<aside class="split-chart">
+<a class="back" href="{{ url_for('parties') }}">← ย้อนกลับ</a>
 
 <section class="profile party-head" style="{{ chip_style(party.color) }}">
-  <h1><span class="swatch"></span>พรรค{{ party.name }}</h1>
-  {% if party.name_en %}<p class="muted profile-meta">{{ party.name_en }}</p>{% endif %}
-  <dl class="stats">
-    <div><dt>ผู้อภิปราย</dt><dd>{{ stats.members }}</dd></div>
-    <div><dt>ครั้งที่พูด</dt><dd>{{ stats.speeches|num }}</dd>
-         <dd class="sub">{{ (stats.speeches / house.speeches)|pct }} ของสภา</dd></div>
-    <div><dt>จำนวนคำ</dt><dd>{{ stats.words|num }}</dd>
-         <dd class="sub">{{ (stats.words / house.words)|pct }} ของสภา · อันดับ {{ rank }}</dd></div>
-    <div><dt>การประชุมที่ร่วมอภิปราย</dt><dd>{{ stats.meetings }} <span class="sub">/ {{ house.meetings }}</span></dd></div>
-    <div><dt>คำต่อคน</dt><dd>{{ (stats.words / stats.members)|round|int|num }}</dd></div>
-  </dl>
+  <h1>{{ party_icon(party.name, party.color, party.id, 'lg') }}พรรค{{ party.name }}</h1>
 </section>
 
-<section class="card cloud-card">
+<section class="cloud-card">
   <div class="card-head">
-    <h2>ประเด็นของพรรค</h2>
-    <div class="seg" role="group" id="cloud-modes">
-      <button data-mode="distinctive" class="on" title="คำที่พรรคนี้ใช้บ่อยกว่าค่าเฉลี่ยของทั้งสภา">คำเด่น</button>
-      <button data-mode="frequent" title="คำที่ใช้บ่อยที่สุด">ใช้บ่อย</button>
+    <div class="seg" role="group" id="viz-tabs" aria-label="รูปแบบการแสดงผล">
+      <button type="button" data-view="distinctive" aria-pressed="true" class="on" title="คำที่พรรคนี้ใช้บ่อยกว่าคนอื่นๆ">คำเด่น (เทียบกับคนอื่นๆ)</button>
+      <button type="button" data-view="frequent" aria-pressed="false" title="คำที่ใช้บ่อยที่สุด">คำที่ใช้บ่อย</button>
+      <button type="button" data-view="bubbles" aria-pressed="false" title="ผู้พูดแต่ละคน ขนาดตามจำนวนคำ">ผู้อภิปราย</button>
     </div>
   </div>
-  <div id="cloud" class="cloud" aria-label="word cloud"></div>
-  <p class="muted small">ไม่รวมคำพูดของประธานในที่ประชุม และชื่อบุคคล จังหวัด พรรค · วางเมาส์บนคำเพื่อดูจำนวนครั้ง</p>
+  <div class="viz-panel" id="panel-cloud">
+    <div id="cloud" class="cloud" aria-label="word cloud"></div>
+    <p class="muted small">ไม่รวมคำพูดของประธานในที่ประชุม และชื่อบุคคล จังหวัด พรรค</p>
+  </div>
+  <div class="viz-panel" id="panel-bubbles" hidden>
+    <div class="bubbles" id="bubbles"></div>
+    <script type="application/json" id="bubble-data">{{ bubbles|tojson }}</script>
+    <p class="muted small bubble-note">พื้นที่ฟอง = จำนวนคำของแต่ละคน</p>
+  </div>
 </section>
 
-<section class="card">
+</aside>
+<div class="split-list">
+<dl class="stats">
+  <!-- <div><dt>ผู้อภิปราย</dt><dd>{{ stats.members }}</dd></div> -->
+  <div><dt>ครั้งที่พูด</dt><dd>{{ stats.speeches|num }}</dd>
+       <dd class="sub">{{ (stats.speeches / house.speeches)|pct }} ของสภา</dd></div>
+  <div><dt>จำนวนคำ</dt><dd>{{ stats.words|num }}</dd>
+       <dd class="sub">{{ (stats.words / house.words)|pct }} ของสภา</dd></div>
+  <div><dt>การประชุมที่อภิปราย</dt><dd>{{ stats.meetings }} <span class="sub">/ {{ house.meetings }}</span></dd>
+       {{ rank_note(ranks.meetings) }}</div>
+  <div><dt>คำต่อคน</dt><dd>{{ (stats.words / stats.members)|round|int|num }}</dd>
+       {{ rank_note(ranks.words_per_member) }}</div>
+</dl>
+<section class="members">
+  <div class="list-head">
+  <div class="list-title" aria-hidden="true">พรรค{{ party.name }}</div>
   <div class="card-head">
-    <h2>สมาชิกที่อภิปราย <span class="muted">({{ members|length }})</span></h2>
+    <h2>สมาชิกที่อภิปราย <span class="muted">({{ members|length }} คน)</span></h2>
+  </div>
+  <div class="filters">
     <input id="member-search" type="search" placeholder="ค้นหาชื่อ / จังหวัด" autocomplete="off">
   </div>
-  <div class="table-wrap flush">
+  </div>
+  <div class="table-wrap">
   <table class="people sortable" id="members">
     <thead>
       <tr>
         <th class="r num">#</th>
-        <th data-key="name"><button type="button">ชื่อ</button></th>
-        <th data-key="province"><button type="button">จังหวัด</button></th>
+        <th class="multi-head">
+          <button type="button" data-key="name">ชื่อ</button>
+          <button type="button" data-key="province">จังหวัด</button>
+        </th>
         <th data-key="speeches" data-type="num" class="r"><button type="button">พูด (ครั้ง)</button></th>
         <th data-key="words" data-type="num" class="r"><button type="button">คำ</button></th>
         <th data-key="meetings" data-type="num" class="r"><button type="button">ประชุม</button></th>
@@ -54,12 +77,15 @@
           data-speeches="{{ m.speeches }}" data-words="{{ m.words }}" data-meetings="{{ m.meetings }}">
         <td class="r num muted"></td>
         <td class="name">
-          <a href="{{ url_for('mp', pid=m.id) }}">{{ m.name }}</a>
-          {% if m.is_presiding %}<span class="badge" title="เคยทำหน้าที่ประธานในที่ประชุม — คำพูดส่วนใหญ่เป็นการดำเนินการประชุม จึงไม่นับในกลุ่มคำของพรรค">ประธานในที่ประชุม</span>{% endif %}
-          {% if m.now_party %}<a class="chip chip-sm" style="{{ chip_style(m.now_party_color) }}"
-             href="{{ url_for('party', party_id=m.now_party_id) }}" title="สังกัดล่าสุด">→ {{ m.now_party }}</a>{% endif %}
+          <div class="person">
+            {{ party_icon(party.name, party.color, party.id) }}
+            <div>
+              <a class="row-link" href="{{ url_for('mp', pid=m.id) }}">{{ m.name|dname }}</a>
+              <div class="person-sub muted small">สส.{% if m.province %} {{ 'บัญชีรายชื่อ' if m.province == 'แบบบัญชีรายชื่อ' else m.province }}{% endif %}
+                {%- if m.now_party %} · สังกัดล่าสุด <a class="party-link" href="{{ url_for('party', party_id=m.now_party_id) }}">→ พรรค{{ m.now_party }}</a>{% endif %}</div>
+            </div>
+          </div>
         </td>
-        <td class="prov">{{ m.province or '' }}</td>
         <td class="r">{{ m.speeches|num }}</td>
         <td class="r">{{ m.words|num }}</td>
         <td class="r">{{ m.meetings }}</td>
@@ -73,21 +99,44 @@
   </table>
   </div>
 </section>
+</div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="{{ url_for('static', filename='bubbles.js') }}"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
 <script src="{{ url_for('static', filename='cloud.js') }}"></script>
 <script>
-  setupCloud(document.getElementById('cloud'), {{ url_for('party_cloud', party_id=party.id, mode='MODE')|tojson }},
-             { controls: document.getElementById('cloud-modes') });
+  const cloud = setupCloud(document.getElementById('cloud'), {{ url_for('party_cloud', party_id=party.id, mode='MODE')|tojson }});
+  (() => {  // one switch for every view: two word-cloud modes and the speaker bubbles (restored when coming back)
+    const buttons = [...document.querySelectorAll('#viz-tabs [data-view]')];
+    const cloudPanel = document.getElementById('panel-cloud'), bubblePanel = document.getElementById('panel-bubbles');
+    function show(view) {
+      for (const b of buttons) {
+        const on = b.dataset.view === view;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on);
+      }
+      cloudPanel.hidden = view === 'bubbles';
+      bubblePanel.hidden = view !== 'bubbles';
+      PageState.set('viz', view);
+      if (view !== 'bubbles') cloud.setMode(view);  // draws it: a cloud can only be sized while visible
+    }
+    buttons.forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+    const saved = PageState.get('viz', 'distinctive');
+    if (saved !== 'distinctive' && buttons.some(b => b.dataset.view === saved)) show(saved);
+  })();
   (() => {
     const search = document.getElementById('member-search');
+    search.value = PageState.get('q', '');
     const table = SortableTable(document.getElementById('members'), {
       sort: [{ key: 'words', dir: -1 }],
       filter: r => { const q = search.value.trim().toLowerCase(); return !q || r.dataset.search.toLowerCase().includes(q); },
     });
-    search.addEventListener('input', table.render);
+    search.addEventListener('input', () => { PageState.set('q', search.value); table.render(); });
+    PageState.restoreScroll();
   })();
 </script>
 {% endblock %}

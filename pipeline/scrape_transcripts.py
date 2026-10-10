@@ -19,10 +19,10 @@ Output (default ./data):
   data/<phase>/<meeting_id>_<date>.txt    readable transcript grouped by speaker
 
 Examples:
-  python scrape_transcripts.py                          # 2026-09-01 .. today
-  python scrape_transcripts.py --since 2026-08-01 --until 2026-08-31
-  python scrape_transcripts.py --meeting 2026/108       # one meeting
-  python scrape_transcripts.py --force                  # re-download existing files
+  python pipeline/scrape_transcripts.py                          # 2026-09-01 .. today
+  python pipeline/scrape_transcripts.py --since 2026-08-01 --until 2026-08-31
+  python pipeline/scrape_transcripts.py --meeting 2026/108       # one meeting
+  python pipeline/scrape_transcripts.py --force                  # re-download existing files
 """
 
 from __future__ import annotations
@@ -336,8 +336,8 @@ def main() -> None:
                     help="last meeting date to include, YYYY-MM-DD (default: today)")
     ap.add_argument("--meeting", action="append", default=[], metavar="PHASE/ID",
                     help="scrape specific meeting(s) instead of a date range, e.g. 2026/108 (repeatable)")
-    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent / "data",
-                    help="output directory (default: ./data next to this script)")
+    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "data",
+                    help="output directory (default: data/ in the project root)")
     ap.add_argument("--workers", type=int, default=4, help="parallel clip requests per meeting (default 4)")
     ap.add_argument("--delay", type=float, default=0.2, help="pause after each request, seconds (default 0.2)")
     ap.add_argument("--force", action="store_true", help="re-download meetings that are already saved")

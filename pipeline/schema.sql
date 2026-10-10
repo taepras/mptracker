@@ -43,8 +43,21 @@ CREATE TABLE IF NOT EXISTS persons (
   id           INTEGER PRIMARY KEY,
   name         TEXT NOT NULL,                -- display name: the most common spelling, title included
   name_key     TEXT NOT NULL UNIQUE,         -- title-less, space-less key used to merge spellings (names.py)
-  is_presiding INTEGER NOT NULL DEFAULT 0    -- has chaired a sitting (Speaker / deputy / President of Parliament);
+  is_presiding INTEGER NOT NULL DEFAULT 0,   -- has chaired a sitting (Speaker / deputy / President of Parliament);
                                              -- derived from minute markers, refreshed by build_db.py
+  is_mp        INTEGER NOT NULL DEFAULT 0    -- listed in the official roster of House members (members table)
+);
+
+-- Official roster of the House (hris.parliament.go.th), imported from data/members.json by build_db.py.
+-- Covers every sitting member, including those who never spoke (person_id is NULL for them).
+CREATE TABLE IF NOT EXISTS members (
+  member_no   INTEGER PRIMARY KEY,           -- เลขประจำตัวสมาชิก
+  name        TEXT NOT NULL,
+  name_key    TEXT NOT NULL,
+  party_id    INTEGER REFERENCES parties(id),   -- current party
+  province    TEXT,                          -- 'แบบบัญชีรายชื่อ' for party-list members
+  district    INTEGER,                       -- constituency number; NULL for party-list members
+  person_id   INTEGER REFERENCES persons(id)
 );
 
 -- Every raw spelling seen for a person ("นายอนุสรณ์ ธรรมใจ", "๑๙๓. นาง…", doubled names, …)
@@ -89,6 +102,7 @@ CREATE TABLE IF NOT EXISTS speeches (
   person_id       INTEGER REFERENCES persons(id),
   party_id        INTEGER REFERENCES parties(id),   -- party at the time
   province        TEXT,
+  party_source    TEXT NOT NULL DEFAULT 'site', -- where party_id came from: 'site' | 'roster' (members table) | 'intro' (self-introduction)
   speaker_source  TEXT NOT NULL,             -- 'site' | 'inferred' (from an inline marker) | 'none'
   speaker_label   TEXT,                      -- role/constituency from marker, e.g. 'ประธานสภาผู้แทนราษฎร'
   first_clip_seq  INTEGER,

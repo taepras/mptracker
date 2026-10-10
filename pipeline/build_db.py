@@ -16,9 +16,9 @@ speaker) from the transcript segments:
   3. Each speech is tokenized with PyThaiNLP for word counts and full-text search.
 
 Usage:
-  .venv/bin/python build_db.py                 # data/ -> mptracker.db
-  .venv/bin/python build_db.py --rebuild       # re-import every meeting
-  .venv/bin/python build_db.py --db other.db --data data
+  .venv/bin/python pipeline/build_db.py                 # data/ -> mptracker.db
+  .venv/bin/python pipeline/build_db.py --rebuild       # re-import every meeting
+  .venv/bin/python pipeline/build_db.py --db other.db --data data
 """
 
 from __future__ import annotations
@@ -33,13 +33,13 @@ import sys
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from pythainlp.corpus import thai_stopwords, thai_words
-from pythainlp.tokenize import word_tokenize
-from pythainlp.util import dict_trie
+from pythainlp.corpus import thai_stopwords
 
 from names import TITLES, clean_name, has_formal_title, person_key, pick_display, strip_titles
+from thai_tokenizer import ThaiTokenizer
 
-ROOT = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent  # pipeline/: schema.sql, party_colors.json
+ROOT = HERE.parent  # project root: data/, mptracker.db
 
 # Extra stopwords for parliamentary speech (formalities, fillers). Applied only to terms
 # that are new to the DB; afterwards edit terms.is_stopword directly.
@@ -50,6 +50,9 @@ PARLIAMENT_STOPWORDS = {
     "ซึ่ง", "นั้น", "นี้", "ตรงนี้", "อันนี้", "เรื่อง", "ครั้ง", "ด้วย", "ได้", "ไม่", "ว่า",
     "ที่จะ", "จริง ๆ", "แบบนี้", "แบบนั้น", "ดังนั้น", "ไหม", "มัน", "เนี่ย", "นู้น", "อย่างนี้",
     "อย่างนั้น", "ขออนุญาต", "ทั้งหมด", "ตรงนั้น", "จะต้อง", "เพราะฉะนั้น", "อะไร", "ยังไง",
+    # formulaic phrases / function compounds that the phrase list turns into single tokens
+    "เพื่อนสมาชิก", "สมาชิกสภา", "สมาชิกสภาผู้แทนราษฎร", "ขอเชิญ", "ไม่มี", "กราบ", "อนุญาต",
+    "ผู้ทรงเกียรติ", "ความเคารพ", "ขอบพระคุณ", "สักครู่", "เมื่อสักครู่", "ตอนนี้", "เดี๋ยว",
 }
 
 TITLE_RE = "(?:" + "|".join(map(re.escape, TITLES)) + ")"
@@ -145,20 +148,12 @@ class MarkerFinder:
 # ───────────────────────────────────────────────────────────────── tokenization
 
 
-class Tokenizer:
-    def __init__(self, extra_words: set[str]):
-        # "บอ" in the stock dictionary makes newmm split the very common "บอกว่า" as บอ|กว่า
-        self.trie = dict_trie((set(thai_words()) - {"บอ"}) | extra_words)
-        self.stopwords = set(thai_stopwords()) | PARLIAMENT_STOPWORDS
+class Tokenizer(ThaiTokenizer):
+    """Thai word segmentation (thai_tokenizer.py) plus the stopword list that flags terms on first insert."""
 
-    def tokens(self, text: str) -> list[str]:
-        out = []
-        for t in word_tokenize(text, custom_dict=self.trie, engine="newmm", keep_whitespace=False):
-            t = t.strip()
-            if len(t) < 2 or not re.search(r"[ก-๏A-Za-z]", t) or re.fullmatch(r"[๐-๙0-9.,:%\-/]+", t):
-                continue
-            out.append(t.lower())
-        return out
+    def __init__(self, extra_words: set[str]):
+        super().__init__(extra_words)
+        self.stopwords = set(thai_stopwords()) | PARLIAMENT_STOPWORDS
 
 
 # ───────────────────────────────────────────────────────────────── DB helpers
@@ -224,6 +219,13 @@ def scan_people(files: list[Path]) -> dict:
     usual_party = {k: c.most_common(1)[0][0] for k, c in party_votes.items()}
     return {"names": raw_names, "display": display, "usual_party": usual_party,
             "provinces": provinces, "parties": parties}
+
+
+def lexicon_extras(people: dict) -> set[str]:
+    """Words the tokenizer must keep whole: people's first names and surnames (title stripped),
+    provinces and parties (also as "พรรค…")."""
+    name_words = {w for n in people["display"].values() for w in strip_titles(n).split() if len(w) >= 2}
+    return name_words | people["provinces"] | people["parties"] | {"พรรค" + p for p in people["parties"]}
 
 
 def import_meeting(db: sqlite3.Connection, m: dict, source: Path, ctx: dict) -> tuple[int, int]:
@@ -317,15 +319,15 @@ def import_meeting(db: sqlite3.Connection, m: dict, source: Path, ctx: dict) -> 
             speeches.append([p])
 
     n_words = 0
-    for ordinal, group in enumerate(speeches, 1):
+    texts = [" ".join(p["text"] for p in group) for group in speeches]
+    all_tokens = tok.tokens_many(texts)  # in parallel; the database inserts below stay sequential
+    for ordinal, (group, text, toks) in enumerate(zip(speeches, texts, all_tokens), 1):
         first, last = group[0], group[-1]
-        text = " ".join(p["text"] for p in group)
         sources = {p["source"] for p in group}
         source_ = "inferred" if "inferred" in sources else first["source"]
         label = next((p["label"] for p in group if p["label"]), None)
         party = next((p["party"] for p in group if p["party"]), None)
         province = next((p["province"] for p in group if p["province"]), None)
-        toks = tok.tokens(text)
         n_words += len(toks)
         sid = db.execute(
             """INSERT INTO speeches (speech_key, meeting_id, ordinal, person_id, party_id, province, speaker_source,
@@ -396,15 +398,91 @@ class PersonLookup:
 
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a DB was first created."""
+    speech_cols = {r[1] for r in db.execute("PRAGMA table_info(speeches)")}
+    if "party_source" not in speech_cols:
+        db.execute("ALTER TABLE speeches ADD COLUMN party_source TEXT NOT NULL DEFAULT 'site'")
+    if "party_inferred" in speech_cols:  # replaced by party_source
+        db.execute("UPDATE speeches SET party_id = NULL WHERE party_inferred = 1")
+        db.execute("ALTER TABLE speeches DROP COLUMN party_inferred")
+    if "is_mp" not in {r[1] for r in db.execute("PRAGMA table_info(persons)")}:
+        db.execute("ALTER TABLE persons ADD COLUMN is_mp INTEGER NOT NULL DEFAULT 0")
     person_cols = {r[1] for r in db.execute("PRAGMA table_info(persons)")}
     if "name_key" not in person_cols:
-        sys.exit("This database predates person-name merging. Delete mptracker.db and run build_db.py again.")
+        sys.exit("This database predates person-name merging. Delete mptracker.db and run pipeline/build_db.py again.")
     if "is_presiding" not in person_cols:
         db.execute("ALTER TABLE persons ADD COLUMN is_presiding INTEGER NOT NULL DEFAULT 0")
     cols = {r[1] for r in db.execute("PRAGMA table_info(parties)")}
     for col in ("name_en", "color"):
         if col not in cols:
             db.execute(f"ALTER TABLE parties ADD COLUMN {col} TEXT")
+
+
+def import_members(db: sqlite3.Connection, path: Path) -> tuple[int, list[str]]:
+    """Load the official roster (data/members.json from scrape_members.py) into `members`, link each entry to the
+    person who speaks under that name, and flag persons.is_mp. Returns (matched, names that matched nobody)."""
+    db.execute("DELETE FROM members")
+    db.execute("UPDATE persons SET is_mp = 0")
+    if not path.exists():
+        print(f"No {path.name} — run pipeline/scrape_members.py to add the official roster of MPs.")
+        return 0, []
+    parties = Lookup(db, "parties")
+    person_by_key = dict(db.execute("SELECT name_key, id FROM persons"))
+    unmatched, matched = [], 0
+    for m in json.loads(path.read_text(encoding="utf-8"))["members"]:
+        key = person_key(m["name"])
+        person_id = person_by_key.get(key)
+        if person_id is None:
+            unmatched.append(m["name"])
+        else:
+            matched += 1
+        db.execute("INSERT INTO members (member_no, name, name_key, party_id, province, district, person_id) VALUES (?,?,?,?,?,?,?)",
+                   (m["member_no"], m["name"], key, parties(m["party"]), m["province"], m["district"], person_id))
+    db.execute("UPDATE persons SET is_mp = 1 WHERE id IN (SELECT person_id FROM members WHERE person_id IS NOT NULL)")
+    return matched, unmatched
+
+
+def fill_labels_from_roster(db: sqlite3.Connection) -> tuple[int, int]:
+    """Where the transcript site gave no party/province, use the roster. The party is filled only for people who have
+    no site-given party at all (an MP who changed party may differ from the roster's current one); the province
+    (constituency) never changes, so it is filled wherever missing. Returns (people given a party, speeches given a province)."""
+    people = [r[0] for r in db.execute(
+        """SELECT m.person_id FROM members m WHERE m.person_id IS NOT NULL AND m.party_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM speeches s WHERE s.person_id = m.person_id AND s.party_id IS NOT NULL)
+           AND EXISTS (SELECT 1 FROM speeches s WHERE s.person_id = m.person_id)""")]
+    for pid in people:
+        db.execute("""UPDATE speeches SET party_id = (SELECT party_id FROM members WHERE person_id = ?), party_source = 'roster'
+                      WHERE person_id = ? AND party_id IS NULL""", (pid, pid))
+    provinces = db.execute(
+        """UPDATE speeches SET province = (SELECT province FROM members WHERE person_id = speeches.person_id)
+           WHERE province IS NULL AND person_id IN (SELECT person_id FROM members WHERE person_id IS NOT NULL)""").rowcount
+    return len(people), provinces
+
+
+def infer_missing_parties(db: sqlite3.Connection) -> int:
+    """For people the roster does not cover either: MPs state their party when they introduce themselves
+    ("กระผม <name> สมาชิกสภาผู้แทนราษฎร … พรรคเพื่อไทย"). For people with no party anywhere, take it from such
+    introductions — only when exactly one party is named. Speeches are marked party_source = 'intro'.
+    Returns the number of people filled in."""
+    parties = dict(db.execute("SELECT name, id FROM parties"))
+    if not parties:
+        return 0
+    intro = re.compile(r"(?:สมาชิก(?:สภา)?ผู้แทนราษฎร|ส\.ส\.).{0,60}?พรรค\s?("
+                       + "|".join(sorted(map(re.escape, parties), key=len, reverse=True)) + ")")
+    unlabelled = db.execute("""SELECT p.id, p.name FROM persons p JOIN speeches s ON s.person_id = p.id
+                               GROUP BY p.id HAVING SUM(s.party_id IS NOT NULL) = 0""").fetchall()
+    filled = 0
+    for pid, name in unlabelled:
+        first_name = strip_titles(name).split()[0]
+        votes: collections.Counter = collections.Counter()
+        for (text,) in db.execute("SELECT substr(text, 1, 400) FROM speeches WHERE person_id = ?", (pid,)):
+            if first_name in text[:250] and (m := intro.search(text)):
+                votes[m.group(1)] += 1
+        if len(votes) == 1:
+            party = next(iter(votes))
+            db.execute("UPDATE speeches SET party_id = ?, party_source = 'intro' WHERE person_id = ? AND party_id IS NULL",
+                       (parties[party], pid))
+            filled += 1
+    return filled
 
 
 # Minute-marker roles that mean the person was chairing the sitting.
@@ -424,7 +502,7 @@ def refresh_aggregates(db: sqlite3.Connection) -> None:
 
 
 def apply_party_colors(db: sqlite3.Connection) -> None:
-    path = ROOT / "party_colors.json"
+    path = HERE / "party_colors.json"
     if not path.exists():
         return
     parties = json.loads(path.read_text(encoding="utf-8"))["parties"]
@@ -449,19 +527,12 @@ def main() -> None:
     db = sqlite3.connect(args.db)
     db.execute("PRAGMA foreign_keys = ON")
     db.execute("PRAGMA journal_mode = WAL")
-    db.executescript((ROOT / "schema.sql").read_text(encoding="utf-8"))
+    db.executescript((HERE / "schema.sql").read_text(encoding="utf-8"))
     migrate(db)
 
     print(f"Scanning {len(files)} files for speaker names ...", flush=True)
     people = scan_people(files)
-    # Keep people's first names (title stripped) and surnames as single words.
-    name_words = set()
-    for n in people["display"].values():
-        for w in strip_titles(n).split():
-            if len(w) >= 2:
-                name_words.add(w)
-    party_names = people["parties"]
-    tokenizer = Tokenizer(name_words | people["provinces"] | party_names | {"พรรค" + p for p in party_names})
+    tokenizer = Tokenizer(lexicon_extras(people))
     ctx = {
         "persons": PersonLookup(db, people["display"]), "parties": Lookup(db, "parties"),
         "tags": Lookup(db, "site_tags"), "terms": TermLookup(db, tokenizer.stopwords),
@@ -484,9 +555,23 @@ def main() -> None:
 
     with db:
         apply_party_colors(db)
+        # parties the site leaves blank are filled from the official roster, then from self-introductions;
+        # both are re-derived on every run, so first undo the previous run's fills
+        db.execute("UPDATE speeches SET party_id = NULL, party_source = 'site' WHERE party_source <> 'site'")
+        matched, unmatched = import_members(db, args.data / "members.json")
+        if matched or unmatched:
+            n_party, n_province = fill_labels_from_roster(db)
+            print(f"Roster: {matched} of {matched + len(unmatched)} MPs matched to speakers; party filled for "
+                  f"{n_party} people and province for {n_province} speeches the site left blank.")
+            if unmatched:
+                print(f"  not matched (never spoke, or spelled differently): {', '.join(unmatched)}")
+        filled = infer_missing_parties(db)
+        if filled:
+            print(f"Party filled in from self-introductions for {filled} more people.")
         refresh_aggregates(db)
     db.execute("PRAGMA optimize")
     db.close()
+    tokenizer.close()
     print(f"Imported {done} meeting(s), {skipped} unchanged -> {args.db}")
 
 

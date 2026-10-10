@@ -9,9 +9,9 @@ Every page and JSON endpoint is requested through Flask's test client and writte
 The result needs no server — host it on Cloudflare Pages, GitHub Pages, Netlify, S3, …
 
 Usage:
-  .venv/bin/python export_site.py                    # site served from the domain root
-  .venv/bin/python export_site.py --base /mptracker  # served from a sub-path (e.g. GitHub Pages project site)
-  .venv/bin/python export_site.py --out public
+  .venv/bin/python pipeline/export_site.py                    # site served from the domain root
+  .venv/bin/python pipeline/export_site.py --base /mptracker  # served from a sub-path (e.g. GitHub Pages project site)
+  .venv/bin/python pipeline/export_site.py --out public
 
 Preview:  python3 -m http.server -d dist 8000
 """
@@ -25,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent  # project root: web/, mptracker.db, dist/
 sys.path.insert(0, str(ROOT / "web"))
 import app as webapp  # noqa: E402
 
@@ -65,7 +65,7 @@ def main() -> None:
     base = "/" + args.base.strip("/") if args.base.strip("/") else ""
 
     if not webapp.DB_PATH.exists():
-        sys.exit(f"{webapp.DB_PATH} not found — run build_db.py first.")
+        sys.exit(f"{webapp.DB_PATH} not found — run pipeline/build_db.py first.")
     t0 = time.time()
     webapp.app.config["WORD_STATS"] = webapp.load_word_stats()
     client = webapp.app.test_client()

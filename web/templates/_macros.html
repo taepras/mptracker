@@ -1,0 +1,9 @@
+{# Round party icon: logo (white on the party colour) or the party's first letter; links to the party page. #}
+{% macro party_icon(name, color, party_id, size='') %}
+  {%- if name -%}
+  <a class="avatar {{ size }}" style="{{ chip_style(color) }}" href="{{ url_for('party', party_id=party_id) }}" title="พรรค{{ name }}">
+    {%- set logo = party_logo(name) -%}
+    {%- if logo %}<img src="{{ logo }}" alt="" loading="lazy">{% else %}{{ name[0] }}{% endif -%}
+  </a>
+  {%- else -%}<span class="avatar {{ size }}"></span>{%- endif -%}
+{% endmacro %}

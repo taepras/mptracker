@@ -19,6 +19,14 @@
     return out;
   }
 
+  // Preview window of a long text: starts at the beginning, or — when searching — is centred on the first
+  // match, with the skipped lead-in replaced by "…".
+  function preview(text, q) {
+    const at = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+    const start = at > PREVIEW / 2 ? Math.max(0, at - Math.floor((PREVIEW - q.length) / 2)) : 0;
+    return (start ? '…' : '') + text.slice(start, start + PREVIEW);
+  }
+
   function speechHtml(s, q) {
     const meta = [
       `<strong>${thaiDate(s.date)}</strong>`,
@@ -31,7 +39,7 @@
       `<a class="video" target="_blank" rel="noopener" href="https://asrs.parliament.go.th/video/${s.phase}/${s.meeting}/${s.clip}">▶ คลิป ${s.clip} @ ${mmss(s.start)}</a>`,
     ].join('');
     const body = s.text.length > PREVIEW
-      ? `<details><summary>${highlight(s.text.slice(0, PREVIEW), q)}…</summary><div class="full">${highlight(s.text, q)}</div></details>`
+      ? `<details><summary>${highlight(preview(s.text, q), q)}…</summary><div class="full">${highlight(s.text, q)}</div></details>`
       : `<p>${highlight(s.text, q)}</p>`;
     return `<li class="speech"><div class="speech-meta">${meta}</div>${body}</li>`;
   }
@@ -69,17 +77,25 @@
         `<span class="muted">หน้า ${state.page} / ${pages}</span>` +
         (state.page < pages ? '<a href="#speeches" data-go="1">ถัดไป →</a>' : '');
       clear.hidden = !state.q && !state.meeting;
-      qInput.value = state.q;
+      if (qInput.value.trim() !== state.q.trim()) qInput.value = state.q;  // don't clobber text being typed
       meetingSel.value = state.meeting;
       syncUrl();
     }
 
-    form.addEventListener('submit', e => { e.preventDefault(); state.q = qInput.value; state.page = 1; render(); });
+    // Live search: re-filter shortly after typing stops (Enter just runs it immediately).
+    let timer;
+    const run = () => { clearTimeout(timer); state.q = qInput.value; state.page = 1; render(); };
+    qInput.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 200); });
+    form.addEventListener('submit', e => { e.preventDefault(); run(); });
     meetingSel.addEventListener('change', () => { state.meeting = meetingSel.value; state.page = 1; render(); });
-    clear.addEventListener('click', () => { state.q = ''; state.meeting = ''; state.page = 1; render(); });
+    // These are #speeches links; handle them here so they don't add history entries (the "← ย้อนกลับ" link and the
+    // browser's Back button should leave the page, not undo a jump within it).
+    clear.addEventListener('click', e => {
+      e.preventDefault(); state.q = ''; state.meeting = ''; state.page = 1; render(); root.scrollIntoView();
+    });
     pager.addEventListener('click', e => {
       const go = e.target.closest('[data-go]');
-      if (go) { state.page += +go.dataset.go; render(); }
+      if (go) { e.preventDefault(); state.page += +go.dataset.go; render(); root.scrollIntoView(); }
     });
 
     fetch(url).then(r => r.json()).then(data => {
@@ -89,7 +105,8 @@
       meetingSel.insertAdjacentHTML('beforeend', [...counts].map(([d, n]) =>
         `<option value="${d}">${thaiDate(d)} (${n})</option>`).join(''));
       render();
-      if (location.hash === '#speeches' && (state.q || state.meeting)) root.scrollIntoView();
+      PageState.restoreScroll();
+      if (!PageState.restoring && location.hash === '#speeches' && (state.q || state.meeting)) root.scrollIntoView();
     });
 
     return {

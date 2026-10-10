@@ -1,0 +1,27 @@
+{
+  "_comment": "Party colours applied to the parties table by build_db.py on every run. Edit freely. Source: Wikipedia Module:Political_party (infobox colours), fetched 2026-10-05. 'verified: false' = the Thai↔English name match is a guess.",
+  "parties": {
+    "ภูมิใจไทย":        {"name_en": "Bhumjaithai Party",            "color": "#082680", "logo": "bhumjaithai.png", "verified": true},
+    "เพื่อไทย":         {"name_en": "Pheu Thai Party",              "color": "#E30613", "logo": "pheuthai.png", "verified": true},
+    "ประชาชน":          {"name_en": "People's Party (2024)",        "color": "#FF640B", "logo": "peoples-party.png", "verified": true},
+    "กล้าธรรม":         {"name_en": "Kla Tham Party",               "color": "#50C871", "logo": "klatham.png", "verified": true},
+    "ประชาธิปัตย์":      {"name_en": "Democrat Party",               "color": "#00A1F1", "logo": "democrat.png", "logo_source": "party.ect.go.th", "verified": true},
+    "ประชาชาติ":        {"name_en": "Prachachat Party",             "color": "#BA810D", "logo": "prachachat.png", "logo_source": "party.ect.go.th", "verified": true},
+    "เศรษฐกิจ":         {"name_en": "Economic Party",               "color": "#FEBD00", "logo": "economic.png", "verified": true},
+    "ไทยภักดี":         {"name_en": "Thai Pakdee Party",            "color": "#03C13D", "logo": "thaipakdee.png", "verified": true},
+    "รวมไทยสร้างชาติ":   {"name_en": "United Thai Nation Party",     "color": "#201F73", "logo": "utn.png", "verified": true},
+    "ไทรวมพลัง":        {"name_en": "Thai Ruam Palang Party",       "color": "#260570", "logo": "thairuamphalang.jpg", "verified": true},
+    "เสรีรวมไทย":       {"name_en": "Thai Liberal Party",           "color": "#D8B720", "logo": "thailiberal.png", "logo_source": "party.ect.go.th", "verified": true},
+    "ประชาธิปไตยใหม่":   {"name_en": "New Democracy Party",          "color": "#EE5E17", "logo": "newdemocracy.png", "logo_source": "party.ect.go.th", "verified": true},
+    "พลังประชารัฐ":      {"name_en": "Palang Pracharath Party",      "color": "#006738", "logo": "palangpracharath.png", "verified": true},
+    "รวมใจไทย":         {"name_en": "Ruam Jai Thai Party",          "color": "#EB1B28", "logo": "ruamjaithai.png", "logo_source": "party.ect.go.th", "verified": false},
+    "ไทยสร้างไทย":      {"name_en": "Thai Sang Thai Party",         "color": "#7D21E0", "logo": "thaisangthai.png", "verified": true},
+    "รวมพลังประชาชน":    {"name_en": "People's Power Party (2025)",  "color": "#F26522", "logo": "ruampalangprachachon.png", "logo_source": "party.ect.go.th", "verified": false},
+    "เพื่อชาติไทย":      {"name_en": "Pheu Chart Thai Party",        "color": "#5A2B0B", "logo": "pheuchartthai.png", "logo_source": "party.ect.go.th", "verified": true},
+    "ทางเลือกใหม่":      {"name_en": "New Alternative Party",        "color": "#1E90FF", "logo": "newalternative.png", "logo_source": "party.ect.go.th", "verified": true},
+    "โอกาสใหม่":        {"name_en": "New Opportunity Party",        "color": "#F0666B", "logo": "newopportunity.png", "logo_source": "party.ect.go.th", "verified": true},
+    "ไทยทรัพย์ทวี":      {"name_en": "Thai Subthawee Party",         "color": "#6120CC", "logo": "thaisubthawee.png", "logo_source": "party.ect.go.th", "verified": true},
+    "ใหม่":             {"name_en": "New Party",                    "color": "#172E58", "logo": "newparty.png", "logo_source": "party.ect.go.th", "verified": true},
+    "มิติใหม่":          {"name_en": "New Dimension Party",          "color": "#2E3192", "logo": "newdimension.png", "logo_source": "party.ect.go.th", "verified": true}
+  }
+}

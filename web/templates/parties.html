@@ -1,10 +1,20 @@
 {% extends "base.html" %}
+{% from "_macros.html" import party_icon %}
 {% block title %}พรรคการเมือง — MP Tracker{% endblock %}
 {% block content %}
+<div class="split">
+<aside class="split-chart">
 <section class="hero">
   <h1>พรรคการเมือง</h1>
   <p class="muted">{{ parties|length }} พรรคที่มีสมาชิกอภิปรายในสภา</p>
 </section>
+<section class="bubble-card">
+  <div class="bubbles" id="bubbles"></div>
+  <script type="application/json" id="bubble-data">{{ bubbles|tojson }}</script>
+  <p class="muted small bubble-note">พื้นที่ฟอง = จำนวนคำ</p>
+</section>
+</aside>
+<div class="split-list">
 
 <div class="table-wrap">
 <table class="people sortable" id="parties">
@@ -23,8 +33,10 @@
     <tr data-name="{{ p.name }}" data-members="{{ p.members }}" data-speeches="{{ p.speeches }}" data-words="{{ p.words }}">
       <td class="r num muted"></td>
       <td class="name">
-        <a class="chip" style="{{ chip_style(p.color) }}" href="{{ url_for('party', party_id=p.id) }}">{{ p.name }}</a>
-        {% if p.name_en %}<span class="muted small">{{ p.name_en }}</span>{% endif %}
+        <div class="person">
+          {{ party_icon(p.name, p.color, p.id) }}
+          <a class="row-link" href="{{ url_for('party', party_id=p.id) }}">{{ p.name }}</a>
+        </div>
       </td>
       <td class="r">{{ p.members }}</td>
       <td class="r">{{ p.speeches|num }}</td>
@@ -39,10 +51,15 @@
   </tbody>
 </table>
 </div>
+</div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="{{ url_for('static', filename='bubbles.js') }}"></script>
 <script>
   SortableTable(document.getElementById('parties'), { sort: [{ key: 'words', dir: -1 }] });
+  PageState.restoreScroll();
 </script>
 {% endblock %}
