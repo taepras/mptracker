@@ -36,7 +36,7 @@ from pathlib import Path
 from pythainlp.corpus import thai_stopwords
 
 from names import TITLES, clean_name, has_formal_title, person_key, pick_display, strip_titles
-from thai_tokenizer import ThaiTokenizer
+from thai_tokenizer import ThaiTokenizer, encode_breaks
 
 HERE = Path(__file__).resolve().parent  # pipeline/: schema.sql, party_colors.json
 ROOT = HERE.parent  # project root: data/, mptracker.db
@@ -321,7 +321,8 @@ def import_meeting(db: sqlite3.Connection, m: dict, source: Path, ctx: dict) -> 
     n_words = 0
     texts = [" ".join(p["text"] for p in group) for group in speeches]
     all_tokens = tok.tokens_many(texts)  # in parallel; the database inserts below stay sequential
-    for ordinal, (group, text, toks) in enumerate(zip(speeches, texts, all_tokens), 1):
+    all_breaks = tok.breaks_many(texts)
+    for ordinal, (group, text, toks, breaks) in enumerate(zip(speeches, texts, all_tokens, all_breaks), 1):
         first, last = group[0], group[-1]
         sources = {p["source"] for p in group}
         source_ = "inferred" if "inferred" in sources else first["source"]
@@ -332,11 +333,12 @@ def import_meeting(db: sqlite3.Connection, m: dict, source: Path, ctx: dict) -> 
         sid = db.execute(
             """INSERT INTO speeches (speech_key, meeting_id, ordinal, person_id, party_id, province, speaker_source,
                  speaker_label, first_clip_seq, first_start_sec, last_clip_seq, last_stop_sec, start_clock,
-                 segment_count, char_count, word_count, text)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 segment_count, char_count, word_count, text, breaks)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (f"{_site_id(db, first['segment_id'])}#{first['part']}", mid, ordinal, persons(first["person"]),
              parties(party), province, source_, label, first["clip_seq"], first["start"], last["clip_seq"],
-             last["stop"], clock_add(first["clip_start"], first["start"]), len(group), len(text), len(toks), text),
+             last["stop"], clock_add(first["clip_start"], first["start"]), len(group), len(text), len(toks), text,
+             encode_breaks(breaks)),
         ).lastrowid
         db.executemany("INSERT INTO speech_segments (speech_id, segment_id, part, text) VALUES (?,?,?,?)",
                        [(sid, p["segment_id"], p["part"], p["text"]) for p in group])
@@ -399,6 +401,8 @@ class PersonLookup:
 def migrate(db: sqlite3.Connection) -> None:
     """Add columns introduced after a DB was first created."""
     speech_cols = {r[1] for r in db.execute("PRAGMA table_info(speeches)")}
+    if "breaks" not in speech_cols:
+        db.execute("ALTER TABLE speeches ADD COLUMN breaks TEXT")
     if "party_source" not in speech_cols:
         db.execute("ALTER TABLE speeches ADD COLUMN party_source TEXT NOT NULL DEFAULT 'site'")
     if "party_inferred" in speech_cols:  # replaced by party_source
@@ -411,6 +415,8 @@ def migrate(db: sqlite3.Connection) -> None:
         sys.exit("This database predates person-name merging. Delete mptracker.db and run pipeline/build_db.py again.")
     if "is_presiding" not in person_cols:
         db.execute("ALTER TABLE persons ADD COLUMN is_presiding INTEGER NOT NULL DEFAULT 0")
+    if "speeches" not in {r[1] for r in db.execute("PRAGMA table_info(member_terms)")}:
+        db.execute("ALTER TABLE member_terms ADD COLUMN speeches INTEGER NOT NULL DEFAULT 0")  # refresh_aggregates fills it
     cols = {r[1] for r in db.execute("PRAGMA table_info(parties)")}
     for col in ("name_en", "color"):
         if col not in cols:
@@ -489,11 +495,23 @@ def infer_missing_parties(db: sqlite3.Connection) -> int:
 PRESIDING_LABELS = ("ประธานสภาผู้แทนราษฎร%", "รองประธานสภาผู้แทนราษฎร%", "ประธานรัฐสภา%", "รองประธานรัฐสภา%")
 
 
+def fill_missing_breaks(db: sqlite3.Connection, tok: "Tokenizer", rebuild: bool = False) -> int:
+    """Word boundaries for speeches imported before the breaks column existed (or all of them with rebuild=True,
+    e.g. after a tokenizer change), so the browser's transcript search matches whole words."""
+    where = "" if rebuild else " WHERE breaks IS NULL"
+    rows = db.execute(f"SELECT id, text FROM speeches{where}").fetchall()
+    for i in range(0, len(rows), 2000):
+        chunk = rows[i:i + 2000]
+        codes = [encode_breaks(b) for b in tok.breaks_many([text for _, text in chunk])]
+        db.executemany("UPDATE speeches SET breaks = ? WHERE id = ?", [(c, sid) for c, (sid, _) in zip(codes, chunk)])
+    return len(rows)
+
+
 def refresh_aggregates(db: sqlite3.Connection) -> None:
     """Rebuild derived tables that span all meetings."""
     db.execute("DELETE FROM member_terms")
-    db.execute("""INSERT INTO member_terms (party_id, person_id, term_id, count)
-                  SELECT s.party_id, s.person_id, st.term_id, SUM(st.count)
+    db.execute("""INSERT INTO member_terms (party_id, person_id, term_id, count, speeches)
+                  SELECT s.party_id, s.person_id, st.term_id, SUM(st.count), COUNT(*)
                   FROM speeches s JOIN speech_terms st ON st.speech_id = s.id
                   WHERE s.person_id IS NOT NULL GROUP BY s.party_id, s.person_id, st.term_id""")
     like = " OR ".join("speaker_label LIKE ?" for _ in PRESIDING_LABELS)
@@ -565,6 +583,9 @@ def main() -> None:
                   f"{n_party} people and province for {n_province} speeches the site left blank.")
             if unmatched:
                 print(f"  not matched (never spoke, or spelled differently): {', '.join(unmatched)}")
+        backfilled = fill_missing_breaks(db, tokenizer)
+        if backfilled:
+            print(f"Word boundaries computed for {backfilled:,} speeches.")
         filled = infer_missing_parties(db)
         if filled:
             print(f"Party filled in from self-introductions for {filled} more people.")

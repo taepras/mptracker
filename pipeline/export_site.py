@@ -38,10 +38,10 @@ def urls(db_path: Path) -> list[str]:
     out = ["/", "/parties/"]
     for pid in people:
         out += [f"/mp/{pid}/", f"/api/mp/{pid}/speeches.json"]
-        out += [f"/api/mp/{pid}/cloud-{m}.json" for m in webapp.CLOUD_MODES]
+        out += [f"/api/mp/{pid}/cloud-{m}.json" for m in webapp.MP_CLOUD_MODES]
     for party_id in parties:
-        out.append(f"/party/{party_id}/")
-        out += [f"/api/party/{party_id}/cloud-{m}.json" for m in webapp.CLOUD_MODES]
+        out += [f"/party/{party_id}/", f"/api/party/{party_id}/speeches.json"]
+        out += [f"/api/party/{party_id}/cloud-{m}.json" for m in webapp.PARTY_CLOUD_MODES]
     return out
 
 

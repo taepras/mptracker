@@ -85,7 +85,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   .list-title { display: block; padding-top: 10px; font-weight: 700; font-size: 1.05rem; line-height: 1.4;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
-#speeches { scroll-margin-top: var(--nav-h); }  /* jumping to the speech list must not hide it under the top bar */
+#speeches, #list-section { scroll-margin-top: var(--nav-h); }  /* jumping to the speech list must not hide it under the top bar */
 .table-wrap { overflow-x: auto; width: 100%; border: 1px solid var(--line); border-width: 0 0 1px; }
 table.people { width: 100%; border-collapse: collapse; }
 table.people { font-size: 14px; }
@@ -128,6 +128,25 @@ table.people { font-size: 14px; }
 .seg button { font: inherit; font-size: 0.85rem; border: 0; padding: 6px 14px; background: transparent; color: var(--muted); cursor: pointer; }
 .seg button.on { background: var(--accent); color: var(--surface); }
 #viz-tabs { max-width: 100%; }
+.seg-row { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.info-btn { font: inherit; font-size: 1.05rem; line-height: 1; border: 0; padding: 4px; background: none;
+  color: var(--muted); cursor: pointer; border-radius: 50%; }
+.info-btn:hover { color: var(--accent); }
+
+/* methodology popup (<dialog>, opened by an ⓘ button) */
+dialog.help { position: fixed; max-width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto;
+  padding: 22px 26px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); }
+dialog.help::backdrop { background: rgb(0 0 0 / 0.55); }
+dialog.help h2 { margin: 0 0 10px; padding-right: 32px; font-size: 1.1rem; }
+dialog.help dl { margin: 0; }
+dialog.help dt { font-weight: 600; margin-top: 12px; }
+dialog.help dd { margin: 2px 0 0; color: var(--muted); }
+dialog.help em { font-style: normal; color: var(--text); }
+dialog.help form { position: absolute; top: 10px; right: 10px; margin: 0; }
+.help-close { font: inherit; font-size: 1rem; line-height: 1; width: 32px; height: 32px; padding: 0; border: 0;
+  border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.help-close:hover { color: var(--text); background: var(--line); }
+@media (max-width: 600px) { dialog.help { padding: 18px 18px; } }
 #viz-tabs button { white-space: nowrap; }
 /* three views in one switch: tighten where the left column (or a phone) is narrower than ~380px */
 @media (max-width: 480px), (min-width: 900px) and (max-width: 1180px) { #viz-tabs button { padding: 6px 9px; font-size: 0.8rem; } }
@@ -142,6 +161,8 @@ table.people { font-size: 14px; }
 .speech summary::-webkit-details-marker { display: none; }
 .speech summary::after { content: " อ่านต่อ ▾"; color: var(--accent); font-size: 0.88rem; }
 .speech details[open] summary { display: none; }
+.speech .full { cursor: pointer; }
+.speech .less { color: var(--accent); font-size: 0.88rem; white-space: nowrap; }
 .badge { font-size: 0.75rem; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 
 .pager { display: flex; gap: 16px; justify-content: center; align-items: center; padding-top: 22px; margin-top: 8px; border-top: 1px solid var(--line); }
@@ -268,3 +289,6 @@ a.avatar:hover { text-decoration: none; filter: brightness(1.1); }
 .person-head h1 { margin: 0; line-height: 1.25; }
 .person-head .person-sub { font-size: 0.95rem; }
 .profile-meta { margin-top: 12px; }
+
+/* speaker name at the start of a speech's meta line (party transcript list) */
+.speech-meta .speaker { font-weight: 600; }

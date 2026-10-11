@@ -11,8 +11,14 @@ instead picks, for every run of Thai text, the segmentation with the highest uni
     "atomic" (cannot be built from known words); compounds such as ตัวชี้วัด or ร่วมใน are left out,
     because the dictionaries mix real compounds with accidental ones;
   * names, provinces and party names (passed in by the caller) are kept whole;
+  * so are district and subdistrict names (lexicon/places_th.txt) whose usual split goes through a rare part
+    (ชะเมา, not ชะ + เมา); those made only of everyday words (แม่คือ, บางเขา, ท่าอยู่) stay split, or they would
+    swallow ordinary speech;
   * lexicon/phrases_*.txt list compounds that DO belong together (งดออกเสียง, แลนด์บริดจ์, ตัวชี้วัด …);
-    each is forced to win over its own parts. mine_phrases.py finds them in the transcripts.
+    each is forced to win over its own parts. mine_phrases.py finds them in the transcripts;
+  * lexicon/abbreviations_mined.txt lists dotted abbreviations the dictionaries lack (ครม., กทม., อว. …), found
+    where they stand alone in the transcripts; each wins over its parts (else ครม. -> คร + ม.), also inside a run
+    (มติครม. -> มติ + ครม.).
 
     tok = ThaiTokenizer(extra_words={"ภัณฑิล", ...})
     tok.tokens("ผมขอเสนอแลนด์บริดจ์")  -> ['ผม', 'ขอ', 'เสนอ', 'แลนด์บริดจ์']
@@ -33,6 +39,10 @@ LEXICON_DIR = Path(__file__).resolve().parent / "lexicon"
 PHRASES_MINED = LEXICON_DIR / "phrases_mined.txt"      # written by mine_phrases.py — don't edit
 PHRASES_MANUAL = LEXICON_DIR / "phrases_manual.txt"    # hand-picked additions
 PHRASES_BLOCKED = LEXICON_DIR / "phrases_blocked.txt"  # hand-picked vetoes (win over the other two)
+ABBREVIATIONS_MINED = LEXICON_DIR / "abbreviations_mined.txt"  # written by mine_phrases.py — don't edit
+PLACES = LEXICON_DIR / "places_th.txt"  # district + subdistrict names (third-party list, see its header)
+PLACE_MAX_PART_FREQ = 100_000  # a place name is kept whole only if a part of its split is rarer than this in OSCAR
+ABBREVIATION_MIN_COUNT = 3  # times an abbreviation must stand alone in the transcripts to be listed
 
 OSCAR_MIN_FREQ = 50     # OSCAR words below this are web noise
 DICT_FLOOR = 2          # frequency given to atomic dictionary words OSCAR has never seen
@@ -45,6 +55,11 @@ THAI_WORD_RE = re.compile(r"^[ก-๏]+\.?$|^(?:[ก-ฮ]{1,4}\.){2,6}$")  # wor
 # Thai letters (dots allowed inside, for abbreviations such as ก.ล.ต.), Latin words, digit runs
 TOKEN_RE = re.compile(r"[ก-๏][ก-๏.]*|[A-Za-z][A-Za-z0-9]*(?:[-'][A-Za-z0-9]+)*|[0-9๐-๙]+")
 LETTER_RE = re.compile(r"[ก-๏A-Za-z]")
+# dotted abbreviations standing at the start of a Thai run (after a space, digit, bracket …), e.g. ครม. / รพ.สต.;
+# split into groups: a run of single letters (ก.ค.ศ., ส.ส.) is one abbreviation, each longer group is its own
+# (รพ.สต. -> รพ. + สต., ส.อบจ. -> ส. + อบจ.)
+ABBREVIATION_RUN_RE = re.compile(r"(?<![ก-๏.])(?:[ก-ฮ]{1,5}\.)+")
+ABBREVIATION_GROUP_RE = re.compile(r"(?:[ก-ฮ]\.)+|[ก-ฮ]{2,5}\.")
 # ICU (which segmented OSCAR) leaves fragments: starting with a vowel/tone mark, ending in a leading vowel, mojibake
 BAD_WORD_RE = re.compile(r"^[ะัาำิ-ฺ็-๎]|[เแโใไ]$|เธ.*เธ")
 # leftovers of broken words/abbreviations: start with a vowel/tone mark, or one letter + tone/karan (ร์, ต์, น่)
@@ -68,6 +83,18 @@ def load_phrases(mined: bool = True) -> list[str]:
     return [p for p in dict.fromkeys(wanted) if p not in blocked]
 
 
+def load_abbreviations() -> list[str]:
+    """Mined dotted abbreviations, minus anything in phrases_blocked.txt."""
+    blocked = set(_read_list(PHRASES_BLOCKED))
+    return [a for a in _read_list(ABBREVIATIONS_MINED) if a not in blocked]
+
+
+def find_abbreviations(text: str):
+    """Dotted abbreviations of two or more letters standing at the start of a Thai run in `text`."""
+    for m in ABBREVIATION_RUN_RE.finditer(text):
+        yield from (g for g in ABBREVIATION_GROUP_RE.findall(m.group()) if len(g) > 2)
+
+
 def trusted_compounds() -> set[str]:
     """Words from the dictionaries (a superset of what OSCAR/ICU treats as one word)."""
     return set(thai_words()) | set(thai_orst_words()) | set(thai_volubilis_words()) | set(thai_icu_words())
@@ -79,7 +106,7 @@ def valid_word(word: str) -> bool:
 
 class ThaiTokenizer:
     def __init__(self, extra_words: set[str] = frozenset(), phrases: list[str] | None = None,
-                 workers: int | None = None):
+                 workers: int | None = None, abbreviations: list[str] | None = None):
         freq = collections.Counter()
         for word, count in oscar.word_freqs():  # the list has duplicate entries; they add up
             freq[word] += count
@@ -103,10 +130,29 @@ class ThaiTokenizer:
         self._build_trie(counts)
         self.lexicon_size = len(counts)
 
+        # place names whose split goes through a rare part are kept whole, like names (see PLACE_MAX_PART_FREQ)
+        place_cost = self.log_total - math.log(EXTRA_FREQ)
+        rare_cost = self.log_total - math.log(PLACE_MAX_PART_FREQ)
+        for place in _read_list(PLACES):
+            if place in counts or not valid_word(place):
+                continue
+            parts, unknown, cost = self._viterbi(place)
+            if cost > place_cost and (unknown or max(self._best_cost(p) for p in parts) > rare_cost):
+                self._insert(place, place_cost)
+
+        # dotted abbreviations the dictionaries lack beat their parts the same way (ครม. over คร + ม.); they are
+        # atomic, not phrases: no parts in breaks()
+        for abbr in sorted(set(load_abbreviations() if abbreviations is None else abbreviations), key=len):
+            if abbr not in counts:
+                self._insert(abbr, self._best_cost(abbr) - PHRASE_MARGIN)
+
         # approved phrases beat the best segmentation of their own text by a fixed margin
         # shortest first, so a longer phrase always beats a split into shorter ones
+        self.phrase_parts: dict[str, list[str]] = {}  # phrase -> its segmentation without itself, for breaks()
         for phrase in sorted(set(load_phrases() if phrases is None else phrases), key=len):
-            if phrase not in counts:
+            parts = self._viterbi(phrase)[0]
+            if len(parts) > 1:  # not already one word (a place name or abbreviation can make it one)
+                self.phrase_parts[phrase] = parts
                 self._insert(phrase, self._best_cost(phrase) - PHRASE_MARGIN)
         self.workers = workers if workers is not None else min(8, multiprocessing.cpu_count())
         self._pool = None
@@ -200,6 +246,38 @@ class ThaiTokenizer:
                 out.append(piece.lower())
         return [t for t in out if len(t) >= 2 and LETTER_RE.search(t) and not LEFTOVER_RE.search(t)]
 
+    def _parts(self, token: str) -> list[str]:
+        """A phrase token split back into its words (recursively: phrases can be built from shorter phrases)."""
+        parts = self.phrase_parts.get(token)
+        return [p for part in parts for p in self._parts(part)] if parts else [token]
+
+    def breaks(self, text: str) -> list[int]:
+        """Word-boundary offsets in `text`: every place a word starts or ends, with phrases split into their words.
+        Offsets count UTF-16 units, as JavaScript does, for the transcript search in static/speeches.js: a match must
+        start and end on a boundary, so คดี is not found inside โชคดี, but งบ is still found in งบประมาณ.
+        A word's final dot is also a boundary, so ครม finds ครม."""
+        out: set[int] = set()
+        for m in TOKEN_RE.finditer(text.replace("ๆ", " ").replace("ฯ", " ")):  # same length: offsets stay valid
+            out.add(m.start())
+            out.add(m.end())
+            if "ก" <= m.group()[0] <= "๏":
+                pos = m.start()
+                for token in self._viterbi(m.group())[0]:
+                    for part in self._parts(token):
+                        pos += len(part)
+                        out.add(pos)
+                        if len(part) > 2 and part.endswith("."):
+                            out.add(pos - 1)
+        result = sorted(out)
+        if any(ord(ch) > 0xFFFF for ch in text):  # characters outside the BMP take two units in JavaScript
+            units, n = [], 0
+            for ch in text:
+                units.append(n)
+                n += 2 if ord(ch) > 0xFFFF else 1
+            units.append(n)
+            result = [units[i] for i in result]
+        return result
+
     def tokens_many(self, texts: list[str]) -> list[list[str]]:
         """tokens() over many texts, spread over worker processes (fork: the trie is shared, not pickled)."""
         if self.workers <= 1 or len(texts) < 20:
@@ -209,6 +287,16 @@ class ThaiTokenizer:
         if self._pool is None:
             self._pool = multiprocessing.get_context("fork").Pool(self.workers)
         return self._pool.map(_tokens_in_worker, texts, chunksize=8)
+
+    def breaks_many(self, texts: list[str]) -> list[list[int]]:
+        """breaks() over many texts, in the same worker processes as tokens_many()."""
+        if self.workers <= 1 or len(texts) < 20:
+            return [self.breaks(t) for t in texts]
+        global _ACTIVE
+        _ACTIVE = self
+        if self._pool is None:
+            self._pool = multiprocessing.get_context("fork").Pool(self.workers)
+        return self._pool.map(_breaks_in_worker, texts, chunksize=8)
 
     def close(self) -> None:
         if self._pool is not None:
@@ -222,3 +310,33 @@ _ACTIVE: ThaiTokenizer | None = None
 
 def _tokens_in_worker(text: str) -> list[str]:
     return _ACTIVE.tokens(text)
+
+
+def _breaks_in_worker(text: str) -> list[int]:
+    return _ACTIVE.breaks(text)
+
+
+# Word boundaries are stored and shipped as a compact string: the gaps between consecutive offsets, one character
+# each from BREAK_DIGITS when the gap is under 62, otherwise "_<base 10>_". Decoded by static/speeches.js.
+BREAK_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def encode_breaks(offsets: list[int]) -> str:
+    out, prev = [], 0
+    for o in offsets:
+        gap, prev = o - prev, o
+        out.append(BREAK_DIGITS[gap] if gap < len(BREAK_DIGITS) else f"_{gap}_")
+    return "".join(out)
+
+
+def decode_breaks(code: str) -> list[int]:
+    out, pos, i = [], 0, 0
+    while i < len(code):
+        if code[i] == "_":
+            j = code.index("_", i + 1)
+            gap, i = int(code[i + 1:j]), j + 1
+        else:
+            gap, i = BREAK_DIGITS.index(code[i]), i + 1
+        pos += gap
+        out.append(pos)
+    return out

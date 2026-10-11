@@ -28,6 +28,14 @@
   <script>window.TITLES = {{ TITLES|tojson }};</script>
   <script src="{{ url_for('static', filename='page-state.js') }}"></script>
   <script src="{{ url_for('static', filename='table-sort.js') }}"></script>
+  <script>
+    // [data-dialog] buttons open the <dialog> with that id; a click on the backdrop closes it.
+    document.addEventListener('click', e => {
+      const opener = e.target.closest('[data-dialog]');
+      if (opener) document.getElementById(opener.dataset.dialog)?.showModal();
+      else if (e.target instanceof HTMLDialogElement) e.target.close();
+    });
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

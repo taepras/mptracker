@@ -1,9 +1,10 @@
 // Word cloud: setupCloud(container, urlTemplate, {controls, onClick}).
-// urlTemplate contains MODE (replaced by distinctive|frequent) and returns [[word, weight, count], …].
+// urlTemplate contains MODE (replaced by the mode name) and returns [[word, weight, count], …]
+// (for the per-speech modes, tfidf and distinctive-speech, count is the number of speeches using the word).
 // Mode buttons: any .seg button[data-mode] inside `controls` switch ?mode=… and redraw.
 // Returns { setMode(mode), redraw() } for pages that drive the mode themselves. A hidden cloud cannot be sized, so
 // drawing is skipped while the container is hidden; call redraw()/setMode() once it is visible again.
-// Hovering a word highlights it and shows how many times it was said (an overlay: the cloud itself is a canvas).
+// Hovering a word highlights it and shows how often it was said (an overlay: the cloud itself is a canvas).
 (function () {
   // Read from CSS at draw time.
   const readPalette = () => {
@@ -11,6 +12,7 @@
     return ['--c1', '--c2', '--c3', '--c4', '--c5'].map(v => css.getPropertyValue(v).trim());
   };
 
+  const PER_SPEECH = new Set(['tfidf', 'distinctive-speech']);
   const MAX_WORDS = 70;  // the API returns 120; fewer words keeps the cloud airy
 
   window.setupCloud = function (el, urlTemplate, { controls = null, onClick = null } = {}) {
@@ -19,7 +21,8 @@
     async function draw() {
       if (!el.clientWidth) return;  // hidden (e.g. another view is showing)
       const run = ++latest;
-      const words = (await (await fetch(urlTemplate.replace('MODE', mode))).json()).slice(0, MAX_WORDS);
+      const shownMode = mode;
+      const words = (await (await fetch(urlTemplate.replace('MODE', shownMode))).json()).slice(0, MAX_WORDS);
       const w = el.clientWidth, h = el.clientHeight;
       if (run !== latest || !w) return;  // a newer draw started meanwhile, or the container got hidden
       el.innerHTML = '';
@@ -47,7 +50,8 @@
         const x = d.x / k, y = d.y / k;
         box.style.left = x + 'px'; box.style.top = y + 'px';
         box.style.width = d.w / k + 'px'; box.style.height = d.h / k + 'px';
-        label.textContent = `${counts[item[0]].toLocaleString()} ครั้ง`;
+        const n = counts[item[0]].toLocaleString();
+        label.textContent = PER_SPEECH.has(shownMode) ? `ใน ${n} การอภิปราย` : `${n} ครั้ง`;
         box.hidden = false;
         label.style.left = Math.min(Math.max(x + d.w / k / 2 - label.offsetWidth / 2, 0), w - label.offsetWidth) - x + 'px';
         box.classList.toggle('below', y < 32);

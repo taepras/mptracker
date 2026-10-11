@@ -27,7 +27,8 @@ CLOUD_TERM_RE = re.compile(r"^[ก-๏A-Za-z][ก-๏A-Za-z0-9 .]*$")
 app = Flask(__name__)
 app.json.ensure_ascii = False  # Thai text as UTF-8, not \uXXXX (halves JSON size)
 app.json.compact = True
-CLOUD_MODES = ("distinctive", "frequent")
+MP_CLOUD_MODES = ("distinctive", "tfidf", "frequent")
+PARTY_CLOUD_MODES = ("distinctive", "distinctive-speech", "frequent")
 
 
 def db() -> sqlite3.Connection:
@@ -45,16 +46,22 @@ def close_db(_exc):
 
 def load_word_stats() -> dict:
     """Corpus-wide word statistics for the word clouds, computed once at startup (<1 s):
-    how many speakers use each term, and each term's House-wide count excluding presiding officers."""
+    how many speakers use each term, each term's House-wide count excluding presiding officers, and how many
+    speeches contain each term (document frequencies for the MP TF-IDF cloud)."""
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     spread = dict(conn.execute("SELECT term_id, COUNT(DISTINCT person_id) FROM member_terms GROUP BY term_id"))
     # baseline for party clouds: everything party members said, minus presiding officers
-    party_totals = dict(conn.execute(
-        """SELECT mt.term_id, SUM(mt.count) FROM member_terms mt JOIN terms t ON t.id = mt.term_id
+    # (in occurrences, and in speeches containing the term for the distinctive-speech mode)
+    party_totals, party_speech_totals = {}, {}
+    for term_id, n, sp in conn.execute(
+        """SELECT mt.term_id, SUM(mt.count), SUM(mt.speeches) FROM member_terms mt JOIN terms t ON t.id = mt.term_id
            WHERE t.is_stopword = 0 AND mt.party_id IS NOT NULL
              AND mt.person_id NOT IN (SELECT id FROM persons WHERE is_presiding)
-           GROUP BY mt.term_id"""))  # stopwords excluded on both sides, like the party's own counts
+           GROUP BY mt.term_id"""):  # stopwords excluded on both sides, like the party's own counts
+        party_totals[term_id], party_speech_totals[term_id] = n, sp
     n_people = conn.execute("SELECT COUNT(DISTINCT person_id) FROM member_terms").fetchone()[0]
+    speech_df = dict(conn.execute("SELECT term_id, SUM(speeches) FROM member_terms GROUP BY term_id"))
+    n_speeches = conn.execute("SELECT COUNT(*) FROM speeches WHERE person_id IS NOT NULL").fetchone()[0]
     # words to keep out of party clouds: people's names (self-introductions, calling on members),
     # province names (constituency mentions) and party names
     name_words = {w for (n,) in conn.execute("SELECT name FROM persons") for w in strip_titles(n).split()}
@@ -62,7 +69,8 @@ def load_word_stats() -> dict:
     parties = {p for (p,) in conn.execute("SELECT name FROM parties")}
     conn.close()
     return {"spread": spread, "party_totals": party_totals, "party_grand_total": sum(party_totals.values()),
-            "n_people": n_people,
+            "party_speech_totals": party_speech_totals, "party_speech_grand_total": sum(party_speech_totals.values()),
+            "n_people": n_people, "speech_df": speech_df, "n_speeches": n_speeches,
             "name_words": name_words, "party_skip": name_words | places | {"พรรค" + p for p in parties}}
 
 
@@ -248,16 +256,39 @@ def mp(pid: int):
 
 @app.route("/api/mp/<int:pid>/speeches.json")
 def mp_speeches(pid: int):
-    """All of a person's speeches, newest first — searched and paged in the browser (static/speeches.js)."""
+    """All of a person's speeches, newest first — searched and paged in the browser (static/speeches.js).
+    `b` holds the word boundaries of `text`, so the browser's search matches whole words."""
     rows = db().execute(
         """SELECT m.meeting_date AS date, m.title, s.start_clock AS clock, s.word_count AS words,
                   s.first_clip_seq AS clip, s.first_start_sec AS start, m.phase, m.meeting_id AS meeting,
-                  s.speaker_source AS source, s.speaker_label AS label, s.text
+                  s.speaker_source AS source, s.speaker_label AS label, s.text, s.breaks AS b
            FROM speeches s JOIN meetings m ON m.id = s.meeting_id
            WHERE s.person_id = ? ORDER BY m.meeting_date DESC, s.ordinal""", (pid,)).fetchall()
     if not rows and not db().execute("SELECT 1 FROM persons WHERE id=?", (pid,)).fetchone():
         abort(404)
     return jsonify([{k: r[k] for k in r.keys() if r[k] is not None} for r in rows])
+
+
+@app.route("/api/party/<int:party_id>/speeches.json")
+def party_speeches(party_id: int):
+    """Every speech made under this party, newest first — all its members together; searched and paged in the browser
+    (static/speeches.js). Same fields as an MP's speeches.json plus the speaker: `pid` (person id) and `name`."""
+    conn = db()
+    rows = conn.execute(
+        """SELECT m.meeting_date AS date, m.title, s.start_clock AS clock, s.word_count AS words,
+                  s.first_clip_seq AS clip, s.first_start_sec AS start, m.phase, m.meeting_id AS meeting,
+                  s.speaker_source AS source, s.speaker_label AS label, s.person_id AS pid, p.name AS name, s.text,
+                  s.breaks AS b
+           FROM speeches s JOIN meetings m ON m.id = s.meeting_id JOIN persons p ON p.id = s.person_id
+           WHERE s.party_id = ? ORDER BY m.meeting_date DESC, s.ordinal""", (party_id,)).fetchall()
+    if not rows and not conn.execute("SELECT 1 FROM parties WHERE id=?", (party_id,)).fetchone():
+        abort(404)
+    out = []
+    for r in rows:
+        item = {k: r[k] for k in r.keys() if r[k] is not None}
+        item["name"] = display_name(r["name"])
+        out.append(item)
+    return jsonify(out)
 
 
 @app.route("/parties/")
@@ -334,15 +365,16 @@ def party(party_id: int):
 
 def _cloud_rows(where: str, arg: int) -> list[sqlite3.Row]:
     return db().execute(
-        f"""SELECT t.id, t.term, SUM(mt.count) AS n FROM member_terms mt JOIN terms t ON t.id = mt.term_id
+        f"""SELECT t.id, t.term, SUM(mt.count) AS n, SUM(mt.speeches) AS sp FROM member_terms mt JOIN terms t ON t.id = mt.term_id
             WHERE {where} AND t.is_stopword = 0 GROUP BY t.id""", (arg,)).fetchall()
 
 
 @app.route("/api/mp/<int:pid>/cloud-<mode>.json")
 def mp_cloud(pid: int, mode: str):
     """[[word, weight, count], …] — mode=distinctive (default): count × log(N speakers / speakers using it);
-    mode=frequent: raw counts."""
-    if mode not in CLOUD_MODES:
+    mode=tfidf: count is the number of the MP's speeches using the word (repeats within one speech count once),
+    × log(N speeches / speeches using it); mode=frequent: raw counts."""
+    if mode not in MP_CLOUD_MODES:
         abort(404)
     person = db().execute("SELECT name FROM persons WHERE id=?", (pid,)).fetchone()
     if not person:
@@ -356,9 +388,16 @@ def mp_cloud(pid: int, mode: str):
         term = r["term"]
         if r["n"] < min_count or term in own_name or not CLOUD_TERM_RE.match(term):
             continue
-        weight = r["n"] * math.log(ws["n_people"] / ws["spread"].get(r["id"], 1)) if mode == "distinctive" else r["n"]
+        if mode == "distinctive":
+            weight = r["n"] * math.log(ws["n_people"] / ws["spread"].get(r["id"], 1))
+        elif mode == "tfidf":
+            if r["sp"] < min_count:
+                continue
+            weight = r["sp"] * math.log(ws["n_speeches"] / ws["speech_df"].get(r["id"], 1))
+        else:
+            weight = r["n"]
         if weight > 0:
-            scored.append((term, round(weight, 2), r["n"]))
+            scored.append((term, round(weight, 2), r["sp"] if mode == "tfidf" else r["n"]))
     scored.sort(key=lambda x: -x[1])
     return jsonify([list(x) for x in scored[:120]])
 
@@ -367,26 +406,31 @@ def mp_cloud(pid: int, mode: str):
 def party_cloud(party_id: int, mode: str):
     """mode=distinctive (default): words that set the party apart from other parties' MPs, scored by
     weighted log-odds with an informative Dirichlet prior (Monroe, Colaresi & Quinn 2008) — a z-score that
-    balances how over-represented a word is against how much evidence there is; mode=frequent: raw counts.
+    balances how over-represented a word is against how much evidence there is; mode=tfidf: number of the party's
+    mode=distinctive-speech: the same log-odds, but counting the speeches that use a word instead of its occurrences
+    (repeats within one speech count once), on both sides; mode=frequent: raw counts.
     Presiding officers' speech (mostly procedure) is left out, as are names of people, provinces and parties."""
-    if mode not in CLOUD_MODES:
+    if mode not in PARTY_CLOUD_MODES:
         abort(404)
     if not db().execute("SELECT 1 FROM parties WHERE id=?", (party_id,)).fetchone():
         abort(404)
     rows = _cloud_rows("mt.party_id = ? AND mt.person_id NOT IN (SELECT id FROM persons WHERE is_presiding)",
                        party_id)
     ws = app.config["WORD_STATS"]
-    totals, grand = ws["party_totals"], ws["party_grand_total"]
-    n_party = sum(r["n"] for r in rows) or 1
+    per_speech = mode == "distinctive-speech"
+    totals, grand = ((ws["party_speech_totals"], ws["party_speech_grand_total"]) if per_speech
+                     else (ws["party_totals"], ws["party_grand_total"]))
+    col = "sp" if per_speech else "n"
+    n_party = sum(r[col] for r in rows) or 1
     n_rest = max(grand - n_party, 1)
     a0 = 5000  # prior strength (pseudo-words)
     min_count = 5 if n_party > 50_000 else 2
     scored = []
     for r in rows:
-        term, y_i = r["term"], r["n"]
+        term, y_i = r["term"], r[col]
         if y_i < min_count or term in ws["party_skip"] or not CLOUD_TERM_RE.match(term):
             continue
-        if mode == "distinctive":
+        if mode != "frequent":
             total = totals.get(r["id"], y_i)
             y_j, a_w = total - y_i, a0 * total / grand
             delta = (math.log((y_i + a_w) / (n_party + a0 - y_i - a_w))

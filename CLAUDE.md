@@ -37,17 +37,22 @@ and a link check over `dist/`.
   `apply_party_colors`, `migrate`.
 - `pipeline/thai_tokenizer.py` — Thai word segmentation: Viterbi over a vocabulary of dictionaries + Wikipedia titles + names,
   costs from OSCAR word frequencies (OSCAR's own token list is mostly ICU fragments/noise — used for frequencies
-  only), plus forced phrases from `pipeline/lexicon/`. `tokens_many()` fans out to a fork pool. Replaces PyThaiNLP newmm.
+  only), plus forced phrases from `pipeline/lexicon/`. District/subdistrict names (`lexicon/places_th.txt`,
+  third-party, MIT) are kept whole only when their usual split has a rare part (`PLACE_MAX_PART_FREQ`): ชะเมา, but not
+  แม่คือ or บางเขา, which would swallow ordinary speech. `tokens_many()` fans out to a fork pool. Replaces PyThaiNLP newmm.
 - `pipeline/mine_phrases.py` — finds compounds to restore after segmentation (dictionary-backed / wikipedia-backed /
   corpus-only tiers, function-word edges rejected). Writes `pipeline/lexicon/phrases_mined.txt` (generated, don't edit);
-  `phrases_manual.txt` and `phrases_blocked.txt` are hand-edited and survive re-mining.
+  `phrases_manual.txt` and `phrases_blocked.txt` are hand-edited and survive re-mining. Also writes
+  `abbreviations_mined.txt`: dotted abbreviations the dictionaries lack (ครม., กทม.), taken from where they stand alone
+  after a space (`--abbreviations-only` re-lists just these in seconds); without them ครม. splits into คร + ม.
 - `pipeline/names.py` — Thai name normalisation (`person_key`, `clean_name`, `strip_titles`, `TITLES`). Shared by
   build_db and the web app; the title list is also passed to the browser as `window.TITLES`.
 - `pipeline/schema.sql` — source of truth for tables; applied with `CREATE … IF NOT EXISTS` on every build.
 - `web/app.py` — Flask app. All routes are file-shaped so the static export can crawl them:
   pages end in `/`, data is `/api/.../*.json` (e.g. `cloud-distinctive.json`, `speeches.json`).
 - `web/static/` — `table-sort.js` (multi-key sortable tables), `cloud.js` (wordcloud2.js wrapper; URL template
-  with `MODE`), `speeches.js` (client-side search/filter/paging of an MP's speeches).
+  with `MODE`), `speeches.js` (client-side search/filter/paging of an MP's or a party's speeches;
+  whole-word matching via each speech's `b` boundaries).
 - `pipeline/export_site.py` — crawls every URL via Flask's test client into `dist/`; `--base` sets the URL prefix.
 - `.github/workflows/pages.yml` — on push: download `mptracker.db.gz` from release `data`, export, deploy.
 
@@ -73,6 +78,10 @@ and a link check over `dist/`.
   the fills every run: roster (`members`) first, then self-introductions; `speeches.party_source` records which.
   Roster party is only used for people with no site-given party (an MP who switched party keeps the historical one).
 - **Presiding officers** (`persons.is_presiding`) are excluded from party clouds; their speech is procedure.
+- **Whole-word search:** the browser has no Thai segmenter, so `build_db.py` stores word boundaries per speech
+  (`speeches.breaks`, `thai_tokenizer.breaks()` / `encode_breaks()`, phrases split into their words) and the speech
+  APIs ship them as `b`. A search hit must start and end on a boundary (คดี not inside โชคดี; งบ still in งบประมาณ);
+  with no whole-word hit at all, speeches.js falls back to substring matching and says so. Offsets are UTF-16 units.
 - **Thai text:** JSON responses use `ensure_ascii=False`. Sort Thai with `Intl.Collator('th')` in JS.
 - **Party colours** live in `pipeline/party_colors.json` (sourced from Wikipedia's party-colour module); build_db
   reports parties missing a colour.

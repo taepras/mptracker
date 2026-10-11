@@ -36,13 +36,35 @@
 
 <section class="cloud-card">
   <div class="card-head">
+    <div class="seg-row">
     <div class="seg" role="group" id="cloud-modes">
-      <button data-mode="distinctive" class="on" title="คำเด่น (เทียบกับคนอื่นๆ)">คำเด่น (เทียบกับคนอื่นๆ)</button>
-      <button data-mode="frequent" title="คำที่ใช้บ่อย">คำที่ใช้บ่อย</button>
+      <button data-mode="distinctive" class="on" title="คำที่คนนี้ใช้มากแต่คนอื่นไม่ค่อยใช้">คำเด่น</button>
+      <button data-mode="tfidf" title="เรื่องที่คนนี้ยกขึ้นมาพูดในหลายการอภิปราย (พูดซ้ำในครั้งเดียวนับเป็นหนึ่ง)">ประเด็นเด่น</button>
+      <button data-mode="frequent" title="คำที่ใช้บ่อยที่สุด นับตรง ๆ">คำใช้บ่อย</button>
+    </div>
+    <button type="button" class="info-btn" data-dialog="cloud-help" aria-label="วิธีคำนวณ" title="วิธีคำนวณ">ⓘ</button>
     </div>
   </div>
   <div id="cloud" class="cloud" aria-label="word cloud"></div>
   <p class="muted small">คลิกคำเพื่อดูการอภิปรายที่มีคำนั้น</p>
+  <dialog class="help" id="cloud-help" aria-labelledby="cloud-help-title">
+    <form method="dialog"><button class="help-close" aria-label="ปิด" title="ปิด">✕</button></form>
+    <h2 id="cloud-help-title">วิธีคำนวณ Word Cloud</h2>
+    <dl>
+      <dt>คำเด่น</dt>
+      <dd>คำที่คนนี้พูดบ่อย แต่ผู้อภิปรายคนอื่นไม่ค่อยใช้ —
+        คะแนน = จำนวนครั้งที่พูด × log(จำนวนผู้อภิปรายทั้งหมด ÷ จำนวนผู้อภิปรายที่เคยใช้คำนี้)
+        คำที่ทุกคนใช้กันหมดจึงได้คะแนนต่ำ</dd>
+      <dt>ประเด็นเด่น</dt>
+      <dd>นับเป็น <em>จำนวนการอภิปราย</em> ที่มีคำนั้น พูดซ้ำหลายครั้งในการอภิปรายเดียวนับเป็นหนึ่ง
+        จึงเห็นเรื่องที่ยกขึ้นมาพูดในหลายโอกาส แทนคำที่พูดวนในครั้งเดียว —
+        คะแนน = จำนวนการอภิปรายที่มีคำนี้ × log(จำนวนการอภิปรายทั้งสภา ÷ จำนวนการอภิปรายที่มีคำนี้) (TF-IDF)</dd>
+      <dt>คำใช้บ่อย</dt>
+      <dd>จำนวนครั้งที่พูดตรง ๆ ไม่เทียบกับใคร คำทั่วไปที่ทุกคนใช้จึงขึ้นมาด้วย</dd>
+    </dl>
+    <p class="muted small">ทุกแบบตัดคำทั่วไปที่ไม่บอกเนื้อหา (เช่น ครับ ประธาน) และชื่อของผู้พูดเอง ·
+      ขนาดคำตามคะแนน · ชี้ที่คำเพื่อดูจำนวน</p>
+  </dialog>
 </section>
 
 </aside>

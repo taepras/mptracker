@@ -42,7 +42,7 @@ pipeline/            data pipeline: scrape -> database -> static site
   scrape_transcripts.py   scrape_members.py   build_db.py   mine_phrases.py   export_site.py   publish_db.sh
   thai_tokenizer.py   names.py          (shared modules)
   schema.sql   party_colors.json        (database definition and party colours)
-  lexicon/                              (multi-word expression lists for the tokenizer)
+  lexicon/                              (phrase, abbreviation and place-name lists for the tokenizer)
 web/                 Flask app, templates and static assets (also compiled to a static site)
 .github/workflows/   GitHub Pages deployment
 data/  dist/  mptracker.db     generated, not in git
@@ -117,7 +117,7 @@ Main tables (full schema with comments in [`pipeline/schema.sql`](pipeline/schem
 | `parties` | Party names, English names and colours (from `pipeline/party_colors.json`) |
 | `speeches`, `speech_segments` | Continuous turns by one speaker, built from segments |
 | `terms`, `speech_terms` | Thai-tokenized word counts per speech; `terms.is_stopword` is editable |
-| `member_terms` | Word counts per (party, person) — backs the word clouds |
+| `member_terms` | Word counts and speech counts per (party, person, term) — backs the word clouds |
 | `topics`, `speech_topics` | Topic labels per speech (manual or model-assigned); survive re-imports |
 | `speeches_fts` | Full-text search over tokenized speech text |
 | `v_speeches` | Convenience view: speech + date + speaker + party + video link |
@@ -153,9 +153,17 @@ The raw transcript needs cleaning before it's useful per speaker:
   compounds the transcripts support: token sequences that spell a dictionary word, or whose parts nearly always
   occur together, are written to `pipeline/lexicon/phrases_mined.txt` and forced to stay together. Hand edits go in
   `pipeline/lexicon/phrases_manual.txt` (add) and `pipeline/lexicon/phrases_blocked.txt` (veto). Names, provinces and parties are
-  kept whole.
+  kept whole, and so are district/subdistrict names (`pipeline/lexicon/places_th.txt`, from
+  [kongvut/thai-province-data](https://github.com/kongvut/thai-province-data), MIT) unless they are made only of
+  everyday words. Dotted abbreviations missing from the dictionaries (ครม., กทม.) are mined into
+  `pipeline/lexicon/abbreviations_mined.txt`.
+- **Whole-word search** — the transcript search in the browser matches whole words only (คดี is not found inside
+  โชคดี, วัง not inside หวัง), using word boundaries the build stores for every speech.
 - **Word clouds** — MP "distinctive words" weight counts by how few other speakers use the word; party
-  "distinctive words" use weighted log-odds against other parties (Monroe, Colaresi & Quinn 2008).
+  "distinctive words" use weighted log-odds against other parties (Monroe, Colaresi & Quinn 2008). A second
+  tab on each page counts speeches instead of occurrences (a word repeated within one speech counts once): on MP
+  pages it is TF-IDF — speeches using the word × log(all speeches / speeches using it); on party pages it is the
+  same log-odds as above, computed on those speech counts for both the party and the other parties.
 
 ## Known limitations
 

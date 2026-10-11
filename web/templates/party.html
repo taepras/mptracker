@@ -15,21 +15,45 @@
 
 <section class="cloud-card">
   <div class="card-head">
+    <div class="seg-row">
     <div class="seg" role="group" id="viz-tabs" aria-label="รูปแบบการแสดงผล">
-      <button type="button" data-view="distinctive" aria-pressed="true" class="on" title="คำที่พรรคนี้ใช้บ่อยกว่าคนอื่นๆ">คำเด่น (เทียบกับคนอื่นๆ)</button>
-      <button type="button" data-view="frequent" aria-pressed="false" title="คำที่ใช้บ่อยที่สุด">คำที่ใช้บ่อย</button>
+      <button type="button" data-view="distinctive" aria-pressed="true" class="on" title="คำที่พรรคนี้ใช้มากกว่าพรรคอื่น">คำเด่น</button>
+      <button type="button" data-view="distinctive-speech" aria-pressed="false" title="เรื่องที่พรรคนี้ยกขึ้นมาพูดในหลายการอภิปรายมากกว่าพรรคอื่น (พูดซ้ำในครั้งเดียวนับเป็นหนึ่ง)">ประเด็นเด่น</button>
+      <button type="button" data-view="frequent" aria-pressed="false" title="คำที่ใช้บ่อยที่สุด นับตรง ๆ">คำใช้บ่อย</button>
       <button type="button" data-view="bubbles" aria-pressed="false" title="ผู้พูดแต่ละคน ขนาดตามจำนวนคำ">ผู้อภิปราย</button>
+    </div>
+    <button type="button" class="info-btn" data-dialog="cloud-help" aria-label="วิธีคำนวณ" title="วิธีคำนวณ">ⓘ</button>
     </div>
   </div>
   <div class="viz-panel" id="panel-cloud">
     <div id="cloud" class="cloud" aria-label="word cloud"></div>
-    <p class="muted small">ไม่รวมคำพูดของประธานในที่ประชุม และชื่อบุคคล จังหวัด พรรค</p>
+    <p class="muted small">ไม่รวมคำพูดของประธานในที่ประชุม และชื่อบุคคล จังหวัด พรรค · คลิกคำเพื่อดูคำอภิปรายที่มีคำนั้น</p>
   </div>
   <div class="viz-panel" id="panel-bubbles" hidden>
     <div class="bubbles" id="bubbles"></div>
     <script type="application/json" id="bubble-data">{{ bubbles|tojson }}</script>
     <p class="muted small bubble-note">พื้นที่ฟอง = จำนวนคำของแต่ละคน</p>
   </div>
+  <dialog class="help" id="cloud-help" aria-labelledby="cloud-help-title">
+    <form method="dialog"><button class="help-close" aria-label="ปิด" title="ปิด">✕</button></form>
+    <h2 id="cloud-help-title">วิธีคำนวณ Word Cloud</h2>
+    <dl>
+      <dt>คำเด่น</dt>
+      <dd>คำที่ สส. พรรคนี้พูดบ่อยกว่า สส. พรรคอื่นอย่างชัดเจน — เทียบสัดส่วนการใช้คำของพรรคนี้กับพรรคอื่น
+        แล้วหารด้วยความไม่แน่นอน (weighted log-odds, Monroe et al. 2008)
+        คำที่ทุกพรรคใช้พอ ๆ กันจึงไม่ขึ้น และคำที่พูดไม่กี่ครั้งต้องมีหลักฐานมากพอจึงจะขึ้น</dd>
+      <dt>ประเด็นเด่น</dt>
+      <dd>วิธีเดียวกับคำเด่น แต่นับเป็น <em>จำนวนการอภิปราย</em> ที่มีคำนั้น ทั้งฝั่งพรรคนี้และพรรคอื่น
+        พูดซ้ำหลายครั้งในการอภิปรายเดียวนับเป็นหนึ่ง จึงเห็นเรื่องที่พรรคยกขึ้นมาพูดในหลายโอกาส
+        ไม่ถูกการอภิปรายยาว ๆ ไม่กี่ครั้งดึงไป</dd>
+      <dt>คำใช้บ่อย</dt>
+      <dd>จำนวนครั้งที่ สส. พรรคนี้พูดตรง ๆ ไม่เทียบกับพรรคอื่น คำทั่วไปที่ทุกพรรคใช้จึงขึ้นมาด้วย</dd>
+      <dt>ผู้อภิปราย</dt>
+      <dd>ฟองละหนึ่งคน พื้นที่ฟองตามจำนวนคำที่พูดในนามพรรคนี้</dd>
+    </dl>
+    <p class="muted small">Word Cloud ทุกแบบไม่รวมคำพูดของประธานในที่ประชุม และตัดชื่อบุคคล จังหวัด พรรค
+      และคำทั่วไปที่ไม่บอกเนื้อหา (เช่น ครับ ประธาน) · ขนาดคำตามคะแนน · ชี้ที่คำเพื่อดูจำนวน</p>
+  </dialog>
 </section>
 
 </aside>
@@ -45,17 +69,26 @@
   <div><dt>คำต่อคน</dt><dd>{{ (stats.words / stats.members)|round|int|num }}</dd>
        {{ rank_note(ranks.words_per_member) }}</div>
 </dl>
-<section class="members">
+<section class="members" id="list-section">
   <div class="list-head">
   <div class="list-title" aria-hidden="true">พรรค{{ party.name }}</div>
   <div class="card-head">
-    <h2>สมาชิกที่อภิปราย <span class="muted">({{ members|length }} คน)</span></h2>
+    <div class="seg" role="group" id="list-tabs" aria-label="รายการ">
+      <button type="button" data-tab="members" aria-pressed="true" class="on">สมาชิกที่อภิปราย ({{ members|length }} คน)</button>
+      <button type="button" data-tab="speeches" aria-pressed="false">คำอภิปราย <span id="sp-total">({{ stats.speeches|num }})</span></button>
+    </div>
   </div>
-  <div class="filters">
+  <div class="filters" id="filters-members">
     <input id="member-search" type="search" placeholder="ค้นหาชื่อ / จังหวัด" autocomplete="off">
     <button type="button" id="member-clear" class="filter-clear" hidden>ล้าง</button>
   </div>
+  <form class="filters" id="sp-form" hidden>
+    <input type="search" id="sp-q" placeholder="ค้นหาในคำอภิปราย" autocomplete="off">
+    <select id="sp-meeting"><option value="">ทุกการประชุม</option></select>
+    <button type="button" id="sp-clear" class="filter-clear" hidden>ล้าง</button>
+  </form>
   </div>
+  <div id="panel-members">
   <div class="table-wrap">
   <table class="people sortable" id="members">
     <thead>
@@ -99,6 +132,11 @@
     </tbody>
   </table>
   </div>
+  </div>
+  <div id="panel-speeches" hidden>
+    <ol class="speeches" id="sp-list"><li class="muted">กำลังโหลดคำอภิปราย…</li></ol>
+    <nav class="pager" id="sp-pager" hidden></nav>
+  </div>
 </section>
 </div>
 </div>
@@ -109,9 +147,38 @@
 <script src="{{ url_for('static', filename='bubbles.js') }}"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
 <script src="{{ url_for('static', filename='cloud.js') }}"></script>
+<script src="{{ url_for('static', filename='speeches.js') }}"></script>
 <script>
-  const cloud = setupCloud(document.getElementById('cloud'), {{ url_for('party_cloud', party_id=party.id, mode='MODE')|tojson }});
-  (() => {  // one switch for every view: two word-cloud modes and the speaker bubbles (restored when coming back)
+  // The party's transcripts download only when their tab is first opened (the file is several MB).
+  const speeches = setupSpeeches(document.getElementById('list-section'),
+                                 {{ url_for('party_speeches', party_id=party.id)|tojson }},
+                                 { lazy: true, speakerUrl: pid => {{ url_for('mp', pid=12345678)|tojson }}.replace('12345678', pid) });
+
+  // Right-hand tabs: member table / all the party's transcripts.
+  const listButtons = [...document.querySelectorAll('#list-tabs [data-tab]')];
+  function showList(tab) {
+    for (const b of listButtons) {
+      const on = b.dataset.tab === tab;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on);
+    }
+    const inSpeeches = tab === 'speeches';
+    document.getElementById('panel-members').hidden = inSpeeches;
+    document.getElementById('filters-members').hidden = inSpeeches;
+    document.getElementById('panel-speeches').hidden = !inSpeeches;
+    document.getElementById('sp-form').hidden = !inSpeeches;
+    PageState.set('list', tab);
+    if (inSpeeches) speeches.load();
+  }
+  listButtons.forEach(b => b.addEventListener('click', () => showList(b.dataset.tab)));
+  // a shared link such as ?q=งบประมาณ, or coming back to the page, reopens the transcript tab
+  const spParams = new URLSearchParams(location.search);
+  if (['q', 'meeting', 'page'].some(k => spParams.has(k)) || PageState.get('list', 'members') === 'speeches') showList('speeches');
+
+  // Clicking a word in the cloud opens the transcripts filtered to that word, with the matches highlighted.
+  const cloud = setupCloud(document.getElementById('cloud'), {{ url_for('party_cloud', party_id=party.id, mode='MODE')|tojson }},
+                           { onClick: word => { showList('speeches'); speeches.search(word); } });
+  (() => {  // one switch for every view: three word-cloud modes and the speaker bubbles (restored when coming back)
     const buttons = [...document.querySelectorAll('#viz-tabs [data-view]')];
     const cloudPanel = document.getElementById('panel-cloud'), bubblePanel = document.getElementById('panel-bubbles');
     function show(view) {

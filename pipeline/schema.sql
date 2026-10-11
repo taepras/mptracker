@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS speeches (
   char_count      INTEGER,
   word_count      INTEGER,
   text            TEXT NOT NULL,
+  breaks          TEXT,                      -- word boundaries in `text` (thai_tokenizer.encode_breaks), so searches
+                                             -- in the browser match whole words: คดี is not found inside โชคดี
   UNIQUE (meeting_id, ordinal)
 );
 CREATE INDEX IF NOT EXISTS idx_speeches_person ON speeches(person_id);
@@ -169,7 +171,8 @@ CREATE TABLE IF NOT EXISTS member_terms (
   party_id   INTEGER,
   person_id  INTEGER NOT NULL,
   term_id    INTEGER NOT NULL,
-  count      INTEGER NOT NULL
+  count      INTEGER NOT NULL,             -- occurrences
+  speeches   INTEGER NOT NULL DEFAULT 0    -- speeches containing the term (repeats within a speech count once)
 );
 CREATE INDEX IF NOT EXISTS idx_member_terms_person ON member_terms(person_id);
 CREATE INDEX IF NOT EXISTS idx_member_terms_party  ON member_terms(party_id);
