@@ -1,7 +1,9 @@
 # MP Tracker
 
 Browse what Thai MPs say in the House of Representatives (สภาผู้แทนราษฎร): every speech by every
-speaker, word clouds of each MP's and each party's themes, and party-level stats.
+speaker, word clouds of each MP's and each party's themes, party-level stats, and a calendar of meetings
+showing each party's share of the words spoken that day, with a page per meeting (word cloud, party shares, speakers,
+transcripts).
 
 Transcripts come from the parliament's AI speech-to-text archive at
 [asrs.parliament.go.th](https://asrs.parliament.go.th). They are machine transcriptions and contain errors;

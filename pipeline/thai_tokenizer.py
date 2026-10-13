@@ -18,7 +18,9 @@ instead picks, for every run of Thai text, the segmentation with the highest uni
     each is forced to win over its own parts. mine_phrases.py finds them in the transcripts;
   * lexicon/abbreviations_mined.txt lists dotted abbreviations the dictionaries lack (ครม., กทม., อว. …), found
     where they stand alone in the transcripts; each wins over its parts (else ครม. -> คร + ม.), also inside a run
-    (มติครม. -> มติ + ครม.).
+    (มติครม. -> มติ + ครม.);
+  * lexicon/words_manual.txt lists single words to keep whole (ฮุจญาจ); Latin entries there may span spaces
+    ("Thai PBS" and "ThaiPBS" both become the one token "thai pbs").
 
     tok = ThaiTokenizer(extra_words={"ภัณฑิล", ...})
     tok.tokens("ผมขอเสนอแลนด์บริดจ์")  -> ['ผม', 'ขอ', 'เสนอ', 'แลนด์บริดจ์']
@@ -40,6 +42,7 @@ PHRASES_MINED = LEXICON_DIR / "phrases_mined.txt"      # written by mine_phrases
 PHRASES_MANUAL = LEXICON_DIR / "phrases_manual.txt"    # hand-picked additions
 PHRASES_BLOCKED = LEXICON_DIR / "phrases_blocked.txt"  # hand-picked vetoes (win over the other two)
 ABBREVIATIONS_MINED = LEXICON_DIR / "abbreviations_mined.txt"  # written by mine_phrases.py — don't edit
+WORDS_MANUAL = LEXICON_DIR / "words_manual.txt"  # hand-picked single words (Thai, or Latin with spaces)
 PLACES = LEXICON_DIR / "places_th.txt"  # district + subdistrict names (third-party list, see its header)
 PLACE_MAX_PART_FREQ = 100_000  # a place name is kept whole only if a part of its split is rarer than this in OSCAR
 ABBREVIATION_MIN_COUNT = 3  # times an abbreviation must stand alone in the transcripts to be listed
@@ -68,11 +71,12 @@ CLUSTER_RE = re.compile(r"[เแโใไ]?[ก-ฮ][ั-ฺ็-๎]*ะ?")  # 
 END = ""  # trie key holding a word's cost
 
 
-def _read_list(path: Path) -> list[str]:
-    """One entry per line; '#' starts a comment; spaces inside an entry are ignored."""
+def _read_list(path: Path, keep_spaces: bool = False) -> list[str]:
+    """One entry per line; '#' starts a comment; spaces inside an entry are ignored unless `keep_spaces`."""
     if not path.exists():
         return []
-    entries = (line.split("#", 1)[0].replace(" ", "").strip() for line in path.read_text(encoding="utf-8").splitlines())
+    entries = (line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines())
+    entries = (" ".join(e.split()) if keep_spaces else e.replace(" ", "").strip() for e in entries)
     return [e for e in entries if e]
 
 
@@ -87,6 +91,12 @@ def load_abbreviations() -> list[str]:
     """Mined dotted abbreviations, minus anything in phrases_blocked.txt."""
     blocked = set(_read_list(PHRASES_BLOCKED))
     return [a for a in _read_list(ABBREVIATIONS_MINED) if a not in blocked]
+
+
+def load_words() -> tuple[list[str], list[str]]:
+    """Hand-picked single words: (Thai words, Latin words lower-cased, their parts joined by one space)."""
+    words = _read_list(WORDS_MANUAL, keep_spaces=True)
+    return [w.replace(" ", "") for w in words if "ก" <= w[0] <= "๏"], [w.lower() for w in words if w[0].isascii()]
 
 
 def find_abbreviations(text: str):
@@ -145,6 +155,18 @@ class ThaiTokenizer:
         for abbr in sorted(set(load_abbreviations() if abbreviations is None else abbreviations), key=len):
             if abbr not in counts:
                 self._insert(abbr, self._best_cost(abbr) - PHRASE_MARGIN)
+
+        # hand-picked words beat their parts the same way, and are atomic too
+        thai_words_manual, latin_words = load_words()
+        for word in thai_words_manual:
+            if word not in counts:
+                self._insert(word, self._best_cost(word) - PHRASE_MARGIN)
+        # Latin words spanning spaces: matched before TOKEN_RE splits them, spaces optional (Thai PBS, ThaiPBS)
+        self.latin_words = {w.replace(" ", ""): w for w in latin_words if " " in w}
+        alternatives = "|".join(r"\s*".join(map(re.escape, w.split())) for w in
+                                sorted(self.latin_words.values(), key=len, reverse=True))
+        self.token_re = (re.compile(rf"(?i:{alternatives})(?![A-Za-z0-9])|{TOKEN_RE.pattern}")
+                         if alternatives else TOKEN_RE)
 
         # approved phrases beat the best segmentation of their own text by a fixed margin
         # shortest first, so a longer phrase always beats a split into shorter ones
@@ -238,12 +260,13 @@ class ThaiTokenizer:
         """Content tokens of `text`: Thai words and Latin words (lower-cased); numbers and stray
         punctuation are dropped. 'ๆ' and 'ฯ' only mark repetition/abbreviation, so they act as spaces."""
         out = []
-        for m in TOKEN_RE.finditer(text.replace("ๆ", " ").replace("ฯ", " ")):
+        for m in self.token_re.finditer(text.replace("ๆ", " ").replace("ฯ", " ")):
             piece = m.group()
             if "ก" <= piece[0] <= "๏":
                 out.extend(self._segment(piece))
             elif piece[0].isalpha():
-                out.append(piece.lower())
+                key = "".join(piece.lower().split())
+                out.append(self.latin_words.get(key, key))
         return [t for t in out if len(t) >= 2 and LETTER_RE.search(t) and not LEFTOVER_RE.search(t)]
 
     def _parts(self, token: str) -> list[str]:

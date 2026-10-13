@@ -33,7 +33,7 @@ and a link check over `dist/`.
   still verifies everything (never `verify=False`).
 - `pipeline/build_db.py` — import + derivation. Key pieces: `overlap_cut` (clip-boundary dedup), `MarkerFinder`
   (inline "name (role)  :" markers → speaker reassignment), `PersonLookup` (name-key merging + aliases),
-  `Tokenizer` (PyThaiNLP newmm with custom dict), `refresh_aggregates` (`member_terms`, `is_presiding`),
+  `Tokenizer` (PyThaiNLP newmm with custom dict), `refresh_aggregates` (`member_terms`, `meeting_terms`, `is_presiding`),
   `apply_party_colors`, `migrate`.
 - `pipeline/thai_tokenizer.py` — Thai word segmentation: Viterbi over a vocabulary of dictionaries + Wikipedia titles + names,
   costs from OSCAR word frequencies (OSCAR's own token list is mostly ICU fragments/noise — used for frequencies
@@ -42,7 +42,8 @@ and a link check over `dist/`.
   แม่คือ or บางเขา, which would swallow ordinary speech. `tokens_many()` fans out to a fork pool. Replaces PyThaiNLP newmm.
 - `pipeline/mine_phrases.py` — finds compounds to restore after segmentation (dictionary-backed / wikipedia-backed /
   corpus-only tiers, function-word edges rejected). Writes `pipeline/lexicon/phrases_mined.txt` (generated, don't edit);
-  `phrases_manual.txt` and `phrases_blocked.txt` are hand-edited and survive re-mining. Also writes
+  `phrases_manual.txt` and `phrases_blocked.txt` are hand-edited and survive re-mining. `words_manual.txt` (hand-edited) holds
+  single words kept whole with no inner search boundaries (ฮุจญาจ); Latin entries may span spaces (`Thai PBS` → token `thai pbs`). Also writes
   `abbreviations_mined.txt`: dotted abbreviations the dictionaries lack (ครม., กทม.), taken from where they stand alone
   after a space (`--abbreviations-only` re-lists just these in seconds); without them ครม. splits into คร + ม.
 - `pipeline/names.py` — Thai name normalisation (`person_key`, `clean_name`, `strip_titles`, `TITLES`). Shared by
@@ -51,8 +52,9 @@ and a link check over `dist/`.
 - `web/app.py` — Flask app. All routes are file-shaped so the static export can crawl them:
   pages end in `/`, data is `/api/.../*.json` (e.g. `cloud-distinctive.json`, `speeches.json`).
 - `web/static/` — `table-sort.js` (multi-key sortable tables), `cloud.js` (wordcloud2.js wrapper; URL template
-  with `MODE`), `speeches.js` (client-side search/filter/paging of an MP's or a party's speeches;
-  whole-word matching via each speech's `b` boundaries).
+  with `MODE`), `speeches.js` (client-side search/filter/paging of an MP's, a party's or a meeting's speeches;
+  whole-word matching via each speech's `b` boundaries, plus speaker-name matches; party icons from
+  `app.party_icons()`, dates linking to `/meeting/<date>/`), `bubbles.js` (fires a cancelable `bubble-click`).
 - `pipeline/export_site.py` — crawls every URL via Flask's test client into `dist/`; `--base` sets the URL prefix.
 - `.github/workflows/pages.yml` — on push: download `mptracker.db.gz` from release `data`, export, deploy.
 
@@ -77,7 +79,8 @@ and a link check over `dist/`.
 - **Party/province gaps:** the transcript site leaves them blank for some MPs. `build_db.py` resets and re-derives
   the fills every run: roster (`members`) first, then self-introductions; `speeches.party_source` records which.
   Roster party is only used for people with no site-given party (an MP who switched party keeps the historical one).
-- **Presiding officers** (`persons.is_presiding`) are excluded from party clouds; their speech is procedure.
+- **Presiding officers** (`persons.is_presiding`) are excluded from party clouds, the meetings calendar and each
+  meeting's page (cloud, party donut, speaker bubbles; `meeting_terms` already leaves them out); their speech is procedure.
 - **Whole-word search:** the browser has no Thai segmenter, so `build_db.py` stores word boundaries per speech
   (`speeches.breaks`, `thai_tokenizer.breaks()` / `encode_breaks()`, phrases split into their words) and the speech
   APIs ship them as `b`. A search hit must start and end on a boundary (คดี not inside โชคดี; งบ still in งบประมาณ);

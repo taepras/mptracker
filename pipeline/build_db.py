@@ -517,6 +517,12 @@ def refresh_aggregates(db: sqlite3.Connection) -> None:
     like = " OR ".join("speaker_label LIKE ?" for _ in PRESIDING_LABELS)
     db.execute(f"""UPDATE persons SET is_presiding = id IN
                    (SELECT person_id FROM speeches WHERE person_id IS NOT NULL AND ({like}))""", PRESIDING_LABELS)
+    db.execute("DELETE FROM meeting_terms")  # after is_presiding: their (procedural) speech is left out
+    db.execute("""INSERT INTO meeting_terms (meeting_id, term_id, count)
+                  SELECT s.meeting_id, st.term_id, SUM(st.count)
+                  FROM speeches s JOIN speech_terms st ON st.speech_id = s.id
+                  WHERE s.person_id IS NOT NULL AND s.person_id NOT IN (SELECT id FROM persons WHERE is_presiding)
+                  GROUP BY s.meeting_id, st.term_id""")
 
 
 def apply_party_colors(db: sqlite3.Connection) -> None:

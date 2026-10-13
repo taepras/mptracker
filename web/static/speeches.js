@@ -1,9 +1,11 @@
 // A list of speeches (one MP's, or a whole party's), rendered in the browser from speeches.json so the page also
 // works as a static site. Search (?q=), meeting filter (?meeting=) and paging (?page=) are kept in the URL.
 //
-//   setupSpeeches(root, url, { lazy, speakerUrl })
+//   setupSpeeches(root, url, { lazy, speakerUrl, parties, meetingUrl })
 //     lazy        don't download the JSON until load() or search() is called (a party's file is several MB)
 //     speakerUrl  pid => URL of the speaker's page; when given, each speech starts with its speaker's name
+//     parties     {party id: {name, style, logo, url}} (app.party_icons): a small party icon before the speaker's name
+//     meetingUrl  date => URL of that day's meeting page; when given, each speech's date links to it
 //   returns { search(q), load() } — search() filters the list by q and highlights the matches
 (function () {
   const PAGE_SIZE = 20;
@@ -58,10 +60,21 @@
     return (html + esc(text.slice(at, to))).replace(/\n/g, '<br>');
   }
 
-  function speechHtml(s, hits, qlen, speakerUrl) {
+  // The round party icon (logo, or the party's first letter) as the party_icon macro draws it, in a small size.
+  function partyIcon(p) {
+    if (!p) return '';
+    const inner = p.logo ? `<img src="${esc(p.logo)}" alt="" loading="lazy">` : esc(p.name[0]);
+    return `<a class="avatar xs" style="${esc(p.style)}" href="${esc(p.url)}" title="พรรค${esc(p.name)}">${inner}</a>`;
+  }
+
+  function speechHtml(s, hits, qlen, opts) {
+    const { speakerUrl, parties, meetingUrl } = opts;
+    const date = thaiDate(s.date);
     const meta = [
-      speakerUrl && s.name ? `<a class="speaker" href="${esc(speakerUrl(s.pid))}">${esc(s.name)}</a>` : '',
-      `<strong>${thaiDate(s.date)}</strong>`,
+      speakerUrl && s.name
+        ? `<span class="speaker">${parties ? partyIcon(parties[s.pt]) : ''}<a href="${esc(speakerUrl(s.pid))}">${
+             s.nameHit ? `<mark>${esc(s.name)}</mark>` : esc(s.name)}</a></span>` : '',
+      meetingUrl ? `<a class="date" href="${esc(meetingUrl(s.date))}" title="ดูการประชุมวันนี้">${date}</a>` : `<strong>${date}</strong>`,
       s.clock ? `<span>${esc(s.clock.slice(0, 5))} น.</span>` : '',
       `<span class="muted">${esc(s.title)}</span>`,
       `<span class="muted">${num(s.words)} คำ</span>`,
@@ -84,7 +97,8 @@
     return `<li class="speech"><div class="speech-meta">${meta}</div>${body}</li>`;
   }
 
-  window.setupSpeeches = function (root, url, { lazy = false, speakerUrl = null } = {}) {
+  window.setupSpeeches = function (root, url, { lazy = false, speakerUrl = null, parties = null, meetingUrl = null } = {}) {
+    const opts = { speakerUrl, parties, meetingUrl };
     const form = root.querySelector('#sp-form'), qInput = root.querySelector('#sp-q'),
           meetingSel = root.querySelector('#sp-meeting'), clear = root.querySelector('#sp-clear'),
           list = root.querySelector('#sp-list'), pager = root.querySelector('#sp-pager'),
@@ -107,12 +121,17 @@
       const inMeeting = all.filter(s => !state.meeting || s.date === state.meeting);
       let rows = inMeeting, partial = false;
       if (q) {
-        // whole words first; if the query is not a whole word anywhere (e.g. part of a word), fall back to any match
-        rows = inMeeting.filter(s => (s.hits = findHits(s, q, false)).length);
-        if (!rows.length) {
-          partial = true;
-          rows = inMeeting.filter(s => (s.hits = findHits(s, q, true)).length);
+        // a speech matches when its speaker's name contains q, or its text does: whole words first; if q is not a
+        // whole word anywhere in the text (e.g. part of a word), fall back to any match
+        const byName = s => (s.nameHit = !!s.name && s.name.toLowerCase().includes(q));
+        rows = inMeeting.filter(s => byName(s) | (s.hits = findHits(s, q, false)).length > 0);
+        if (!rows.some(s => s.hits.length)) {
+          const partialRows = inMeeting.filter(s => s.nameHit | (s.hits = findHits(s, q, true)).length > 0);
+          partial = partialRows.length > rows.length;
+          rows = partialRows;
         }
+      } else {
+        inMeeting.forEach(s => { s.nameHit = false; });
       }
       const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
       state.page = Math.min(Math.max(1, state.page), pages);
@@ -121,7 +140,7 @@
       total.textContent = q || state.meeting ? `(${num(rows.length)}/${num(all.length)})` : `(${num(all.length)})`;
       const note = partial && rows.length
         ? `<li class="muted small search-note">ไม่พบ “${esc(state.q.trim())}” เป็นคำเต็ม — แสดงผลที่มีข้อความนี้อยู่ภายในคำอื่น</li>` : '';
-      list.innerHTML = slice.length ? note + slice.map(s => speechHtml(s, q ? s.hits : [], q.length, speakerUrl)).join('')
+      list.innerHTML = slice.length ? note + slice.map(s => speechHtml(s, q ? s.hits : [], q.length, opts)).join('')
                                     : '<li class="muted">ไม่พบการอภิปราย</li>';
       pager.hidden = pages <= 1;
       pager.innerHTML = (state.page > 1 ? '<a href="#speeches" data-go="-1">← ก่อนหน้า</a>' : '') +

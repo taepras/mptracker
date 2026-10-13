@@ -208,7 +208,7 @@ a.chip:hover { text-decoration: none; filter: brightness(1.08); }
 }
 
 .bubble-note { margin: 14px 0 0; text-align: center; font-size: 0.75rem; }
-.bubbles { --bubble-other: #9aa0a6; max-width: 760px; margin: 0 auto; }
+.bubbles { --bubble-other: #9aa0a6; width: 100%; max-width: 760px; margin: 0 auto; } /* width: it is measured before anything is drawn in it */
 .bubbles svg { width: 100%; height: auto; display: block; }
 .bubbles g.link { cursor: pointer; }
 .bubbles g.link:hover circle { stroke: var(--text); stroke-width: 2; }
@@ -290,5 +290,112 @@ a.avatar:hover { text-decoration: none; filter: brightness(1.1); }
 .person-head .person-sub { font-size: 0.95rem; }
 .profile-meta { margin-top: 12px; }
 
-/* speaker name at the start of a speech's meta line (party transcript list) */
-.speech-meta .speaker { font-weight: 600; }
+/* speaker name (with a small party icon) at the start of a speech's meta line, and the date linking to the meeting */
+.speech-meta .speaker { display: inline-flex; align-items: center; gap: 6px; align-self: center; font-weight: 600; }
+.avatar.xs { width: 20px; height: 20px; font-size: 0.65rem; }
+.speech-meta a.date { font-weight: 600; color: var(--text); }
+.speech-meta a.date:hover { color: var(--accent); }
+
+/* ── meetings calendar (meetings.html): one card per month, each meeting day ringed by party word shares ── */
+.cal-legend { margin-bottom: 20px; }
+.cal-legend p { margin: 0 0 8px; }
+.cal-legend ul { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: 0.85rem; }
+.cal-legend li { display: flex; align-items: center; gap: 6px; }
+.cal-legend .swatch, .day-tip .swatch, .share-table .swatch { width: 12px; height: 12px; border-radius: 3px; }
+.cal-legend a { color: var(--text); }
+
+.cal-months { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+@media (max-width: 1099px) { .cal-months { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .cal-months { grid-template-columns: minmax(0, 1fr); } }
+.cal-month { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px 18px; }
+.cal-month h2 { margin: 0 0 10px; font-size: 1.05rem; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.cal-wd { text-align: center; font-size: 0.75rem; color: var(--muted); padding-bottom: 4px; }
+.cal-day { position: relative; aspect-ratio: 1; display: grid; place-items: center; }
+.cal-day > .day-num { font-size: 0.8rem; color: var(--muted); opacity: 0.6; }
+.day-btn { position: relative; width: 100%; max-width: 58px; aspect-ratio: 1; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: none; color: var(--text); font: inherit; cursor: pointer; text-decoration: none; }
+.day-btn svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg) scale(var(--s, 1));
+  z-index: 0; opacity: 0.75; transition: opacity 0.15s; }
+/* --s: the disc's size, its area in proportion to the day's words; big days spill over their neighbours, so the
+   discs are see-through and every day number sits above every disc */
+/* a pie (slices drawn as one thick stroke reaching the centre) under a radial fade of the card colour:
+   a ring whose inner edge is blurred */
+.day-btn .slice { fill: none; stroke-width: 18.5; }
+.day-btn .fade { fill: url(#day-fade); }
+svg.defs { position: absolute; width: 0; height: 0; }
+.day-btn .day-num { position: relative; z-index: 1; font-size: 0.85rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.day-btn:hover { text-decoration: none; }
+.day-btn:hover svg { filter: brightness(1.2); opacity: 1; }
+
+/* hover tooltip: below the day, opening rightwards (leftwards in the last columns so it stays on screen) */
+.day-tip { display: none; position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: 230px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35); font-size: 0.8rem; line-height: 1.5; pointer-events: none; }
+.tip-left .day-tip { left: auto; right: 0; }
+.day-tip strong, .day-tip > span { display: block; }
+.day-tip ul { margin: 6px 0 0; padding: 0; list-style: none; }
+.day-tip li { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 6px; }
+.day-tip .r { font-variant-numeric: tabular-nums; }
+.day-tip li.more { display: block; }
+@media (hover: hover) { .day-btn:hover + .day-tip { display: block; } }
+.day-btn:focus-visible + .day-tip { display: block; }
+
+.share-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 6px; }
+.share-table td { padding: 4px 6px; border-top: 1px solid var(--line); white-space: nowrap; }
+.share-table td:first-child { display: flex; align-items: center; gap: 8px; padding-left: 0; }
+.share-table td:first-child a { color: var(--text); }
+.share-table .r { text-align: right; font-variant-numeric: tabular-nums; }
+.share-table .bar-cell { width: 40%; }
+.share-table .bar { width: var(--w); margin: 0; }
+.meeting-dialog p { margin: 0 0 6px; }
+.meeting-dialog h2 { margin-bottom: 4px; }
+@media (max-width: 420px) { .share-table .bar-cell { display: none; } }
+
+/* ── one meeting's page (meeting.html) ── */
+.day-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.pie-wrap { display: grid; gap: 16px; margin-top: 14px; }
+.pie { width: 100%; max-width: 260px; height: auto; display: block; margin: 0 auto; }
+.pie .slice { fill: none; stroke-width: 56; transition: opacity 0.15s; }
+.pie-total { text-anchor: middle; font-size: 22px; font-weight: 700; fill: var(--text); font-variant-numeric: tabular-nums; }
+.pie-unit { text-anchor: middle; font-size: 13px; fill: var(--muted); }
+.pie-card .dim { opacity: 0.3; }
+.pie-card tr { transition: opacity 0.15s; }
+.pie-card > p { margin: 12px 0 0; }
+
+/* calendar / list switch and the list view of meetings */
+.view-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
+.legend-toggle { font: inherit; font-size: 0.85rem; padding: 6px 14px; border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer; }
+.legend-toggle:hover { color: var(--text); border-color: var(--muted); }
+.meeting-list .bar-cell { width: 18%; min-width: 120px; }
+.stack { display: flex; gap: 1px; height: 4px; border-radius: 2px; overflow: hidden; }
+.stack span { flex-basis: 0; min-width: 1px; }
+.meeting-list .bar-cell .small { margin-top: 2px; }
+.meeting-list .words-cell { line-height: 2; white-space: normal; }
+.word-chip { display: inline-block; margin: 0 4px 2px 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: 0.95rem; line-height: 1.7; color: var(--text); white-space: nowrap; }
+.word-chip:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+@media (max-width: 720px) {
+  /* each meeting becomes a stacked block: date, words, bar */
+  .meeting-list table, .meeting-list tbody { display: block; width: 100%; }
+  .meeting-list td[data-unit]::after { content: " " attr(data-unit); color: var(--muted); font-size: 0.85em; }
+  .meeting-list tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .meeting-list td { display: block; padding: 0; border: 0; min-width: 0; }
+  .meeting-list .bar-cell, .meeting-list .words-cell { grid-column: 1 / -1; width: auto; min-width: 0; }
+  .meeting-list .words-cell { order: 1; } /* after the date/คำ/คน line, though second in the table */
+  .meeting-list .bar-cell { order: 2; }
+}
+
+/* sortable meetings table: the share column's party picker, and the dimmed bar segments of other parties */
+.meeting-list select { font: inherit; font-size: 0.8rem; margin-left: 6px; max-width: 11em; padding: 1px 4px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); }
+.stack span { transition: opacity 0.15s; }
+.stack span.dim { opacity: 0.25; }
+@media (max-width: 720px) {
+  /* keep the sort buttons on a phone: the header becomes one wrapping row above the blocks */
+  .meeting-list thead { display: block; }
+  .meeting-list thead tr { display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; padding: 0 0 10px; }
+  .meeting-list thead th { display: block; padding: 0; border: 0; white-space: nowrap; }
+  .meeting-list thead th.bar-head { flex-basis: 100%; }
+}

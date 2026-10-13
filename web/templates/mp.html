@@ -102,7 +102,8 @@
 <script src="{{ url_for('static', filename='speeches.js') }}"></script>
 <script>
   const speeches = setupSpeeches(document.getElementById('speeches'),
-                                 {{ url_for('mp_speeches', pid=person.id)|tojson }});
+                                 {{ url_for('mp_speeches', pid=person.id)|tojson }},
+                                 { meetingUrl: date => {{ url_for('meeting', date='0000-00-00')|tojson }}.replace('0000-00-00', date) });
   setupCloud(document.getElementById('cloud'), {{ url_for('mp_cloud', pid=person.id, mode='MODE')|tojson }}, {
     controls: document.getElementById('cloud-modes'),
     onClick: word => speeches.search(word),

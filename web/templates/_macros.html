@@ -7,3 +7,6 @@
   </a>
   {%- else -%}<span class="avatar {{ size }}"></span>{%- endif -%}
 {% endmacro %}
+
+{# A share (0–1) as a percentage with one decimal; tiny non-zero shares read "<0.1%" rather than "0.0%". #}
+{% macro pct(x) -%}{% if x < 0.001 %}&lt;0.1%{% else %}{{ '%.1f'|format(x * 100) }}%{% endif %}{%- endmacro %}

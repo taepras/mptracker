@@ -177,6 +177,15 @@ CREATE TABLE IF NOT EXISTS member_terms (
 CREATE INDEX IF NOT EXISTS idx_member_terms_person ON member_terms(person_id);
 CREATE INDEX IF NOT EXISTS idx_member_terms_party  ON member_terms(party_id);
 
+-- Word counts per (meeting, term), presiding officers left out — rebuilt with member_terms. Backs the
+-- word cloud on each meeting's page.
+CREATE TABLE IF NOT EXISTS meeting_terms (
+  meeting_id INTEGER NOT NULL,
+  term_id    INTEGER NOT NULL,
+  count      INTEGER NOT NULL,
+  PRIMARY KEY (meeting_id, term_id)
+) WITHOUT ROWID;
+
 -- Full-text search over Thai-tokenized speech text (rowid = speeches.id).
 -- Query with space-separated tokens, e.g. MATCH '"ค่า ไฟ"' (tokenize your query the same way).
 CREATE VIRTUAL TABLE IF NOT EXISTS speeches_fts USING fts5(

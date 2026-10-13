@@ -32,9 +32,14 @@
       const palette = readPalette();
       const colorFor = word => palette[[...word].reduce((a, c) => a + c.codePointAt(0), 0) % palette.length];
       const counts = Object.fromEntries(words.map(x => [x[0], x[2]]));
+      // The library's placement grid rounds its cell count up, so a canvas that isn't a whole number of cells lets
+      // words in the last row/column run past the edge and get cut off: size it to whole cells (centred).
+      const grid = Math.round(12 * devicePixelRatio);
       const canvas = document.createElement('canvas');
-      canvas.width = w * devicePixelRatio; canvas.height = h * devicePixelRatio;
-      canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+      canvas.width = Math.floor(w * devicePixelRatio / grid) * grid;
+      canvas.height = Math.floor(h * devicePixelRatio / grid) * grid;
+      canvas.style.width = canvas.width / devicePixelRatio + 'px'; canvas.style.height = canvas.height / devicePixelRatio + 'px';
+      canvas.style.display = 'block'; canvas.style.margin = '0 auto';
       el.append(canvas);
 
       // Hover state: a highlight box over the word's cell-aligned bounds, with a count label that flips below
@@ -47,7 +52,7 @@
       const hide = () => { box.hidden = true; canvas.style.cursor = ''; };
       const show = (item, d) => {
         const k = devicePixelRatio;  // the library reports canvas pixels
-        const x = d.x / k, y = d.y / k;
+        const x = d.x / k + canvas.offsetLeft, y = d.y / k + canvas.offsetTop;  // the canvas is centred in el
         box.style.left = x + 'px'; box.style.top = y + 'px';
         box.style.width = d.w / k + 'px'; box.style.height = d.h / k + 'px';
         const n = counts[item[0]].toLocaleString();
@@ -62,7 +67,7 @@
       WordCloud(canvas, {
         list: words.map(([t, v]) => [t, scale(v) * devicePixelRatio]),
         fontFamily: '"Bai Jamjuree", "Noto Sans Thai", sans-serif',
-        fontWeight: 600, rotateRatio: 0, gridSize: Math.round(12 * devicePixelRatio),
+        fontWeight: 600, rotateRatio: 0, gridSize: grid,
         shrinkToFit: true, drawOutOfBound: false, backgroundColor: 'transparent',
         color: colorFor,
         hover: (item, dimension) => (item && dimension ? show(item, dimension) : hide()),

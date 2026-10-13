@@ -6,6 +6,7 @@ Run:  .venv/bin/python web/app.py   then open http://127.0.0.1:5000
 
 from __future__ import annotations
 
+import datetime
 import json
 import math
 import os
@@ -29,6 +30,7 @@ app.json.ensure_ascii = False  # Thai text as UTF-8, not \uXXXX (halves JSON siz
 app.json.compact = True
 MP_CLOUD_MODES = ("distinctive", "tfidf", "frequent")
 PARTY_CLOUD_MODES = ("distinctive", "distinctive-speech", "frequent")
+MEETING_CLOUD_MODES = ("distinctive", "frequent")
 
 
 def db() -> sqlite3.Connection:
@@ -47,7 +49,7 @@ def close_db(_exc):
 def load_word_stats() -> dict:
     """Corpus-wide word statistics for the word clouds, computed once at startup (<1 s):
     how many speakers use each term, each term's House-wide count excluding presiding officers, and how many
-    speeches contain each term (document frequencies for the MP TF-IDF cloud)."""
+    speeches contain each term (document frequencies for the MP TF-IDF cloud) and how many meetings use it."""
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     spread = dict(conn.execute("SELECT term_id, COUNT(DISTINCT person_id) FROM member_terms GROUP BY term_id"))
     # baseline for party clouds: everything party members said, minus presiding officers
@@ -62,6 +64,8 @@ def load_word_stats() -> dict:
     n_people = conn.execute("SELECT COUNT(DISTINCT person_id) FROM member_terms").fetchone()[0]
     speech_df = dict(conn.execute("SELECT term_id, SUM(speeches) FROM member_terms GROUP BY term_id"))
     n_speeches = conn.execute("SELECT COUNT(*) FROM speeches WHERE person_id IS NOT NULL").fetchone()[0]
+    meeting_df = dict(conn.execute("SELECT term_id, COUNT(*) FROM meeting_terms GROUP BY term_id"))
+    n_meetings = conn.execute("SELECT COUNT(DISTINCT meeting_id) FROM meeting_terms").fetchone()[0]
     # words to keep out of party clouds: people's names (self-introductions, calling on members),
     # province names (constituency mentions) and party names
     name_words = {w for (n,) in conn.execute("SELECT name FROM persons") for w in strip_titles(n).split()}
@@ -71,6 +75,7 @@ def load_word_stats() -> dict:
     return {"spread": spread, "party_totals": party_totals, "party_grand_total": sum(party_totals.values()),
             "party_speech_totals": party_speech_totals, "party_speech_grand_total": sum(party_speech_totals.values()),
             "n_people": n_people, "speech_df": speech_df, "n_speeches": n_speeches,
+            "meeting_df": meeting_df, "n_meetings": n_meetings,
             "name_words": name_words, "party_skip": name_words | places | {"พรรค" + p for p in parties}}
 
 
@@ -149,7 +154,15 @@ def party_logo(name: str | None) -> str | None:
     return url_for("static", filename=f"logos/{f}") if f else None
 
 
-app.jinja_env.globals.update(chip_style=chip_style, highlight=highlight, TITLES=TITLES, party_logo=party_logo)
+def party_icons() -> dict[int, dict]:
+    """Every party's round icon for speeches.js (the party_icon macro's data): {id: {name, style, logo, url}}."""
+    return {r["id"]: {"name": r["name"], "style": chip_style(r["color"]), "logo": party_logo(r["name"]),
+                      "url": url_for("party", party_id=r["id"])}
+            for r in db().execute("SELECT id, name, color FROM parties")}
+
+
+app.jinja_env.globals.update(chip_style=chip_style, highlight=highlight, TITLES=TITLES, party_logo=party_logo,
+                             party_icons=party_icons)
 app.add_template_filter(display_name, "dname")
 
 # Each person's party/province from their most recent speech that has a party.
@@ -227,6 +240,185 @@ def index():
                            bubble_top=min(BUBBLE_TOP, len(rows)))
 
 
+RING_MIN_SHARE = 0.02  # parties below this share of a day's words fold into "อื่น ๆ" on the calendar rings
+DISC_MAX_SCALE = 1.5   # biggest day's calendar disc, relative to its cell (big days may overlap their neighbours)
+DISC_MIN_SCALE = 0.6   # smallest disc, so short days stay readable
+RING_GAP = 0.8  # gap between ring segments, in hundredths of the circumference (~1px at the drawn size)
+OTHER_COLOR = "#7d7d86"  # "อื่น ๆ" and parties with no usable colour
+THAI_WEEKDAYS = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]  # datetime.weekday(): Monday = 0
+THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
+               "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+
+
+def ring_segments(parts: list[dict]) -> list[dict]:
+    """Party shares -> SVG stroke-dasharray segments on a circle with pathLength=100, clockwise from the top,
+    with a small gap between neighbours: [{"dash": "len rest", "offset": -start, "color": …}]."""
+    total = sum(p["words"] for p in parts) or 1
+    segs, start = [], 0.0
+    for p in parts:
+        share = p["words"] / total * 100
+        length = share - (RING_GAP if len(parts) > 1 else 0)
+        if length > 0.3:
+            segs.append({"dash": f"{length:.2f} {100 - length:.2f}", "offset": f"{-start:.2f}", "color": p["color"],
+                         "id": p.get("id"), "name": p.get("name", "อื่น ๆ"), "share": share / 100})
+        start += share
+    return segs
+
+
+def meeting_days(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Every meeting by date ('YYYY-MM-DD', one meeting per day) with its parties' shares of the words spoken
+    (presiding officers left out, as in the party clouds) and the ring segments drawn for them."""
+    rows = conn.execute(
+        """SELECT m.id, m.phase, m.meeting_id, m.meeting_date, m.title, m.episode, m.session_number,
+                  s.party_id, pa.name AS party, pa.color, SUM(s.word_count) AS words,
+                  COUNT(*) AS speeches, COUNT(DISTINCT s.person_id) AS people
+           FROM meetings m
+           JOIN speeches s ON s.meeting_id = m.id AND s.person_id IS NOT NULL
+                          AND s.person_id NOT IN (SELECT id FROM persons WHERE is_presiding)
+           LEFT JOIN parties pa ON pa.id = s.party_id
+           GROUP BY m.id, s.party_id ORDER BY m.meeting_date, words DESC""").fetchall()
+    days: dict[str, dict] = {}
+    for r in rows:
+        d = days.setdefault(r["meeting_date"], {
+            "id": r["id"], "date": r["meeting_date"], "title": r["title"], "episode": r["episode"], "session": r["session_number"],
+            "video": f"https://asrs.parliament.go.th/video/{r['phase']}/{r['meeting_id']}/1",
+            "parties": [], "no_party": 0, "words": 0, "speeches": 0})
+        d["speeches"] += r["speeches"]
+        if r["party_id"] is None:
+            d["no_party"] += r["words"]
+            continue
+        d["words"] += r["words"]
+        d["parties"].append({"id": r["party_id"], "name": r["party"], "words": r["words"],
+                             "color": r["color"] if text_on(r["color"]) else OTHER_COLOR})
+    # speakers per day across parties (a person counts once even if their party changed)
+    for date, n in conn.execute(
+            """SELECT m.meeting_date, COUNT(DISTINCT s.person_id) FROM meetings m JOIN speeches s ON s.meeting_id = m.id
+               WHERE s.person_id IS NOT NULL AND s.person_id NOT IN (SELECT id FROM persons WHERE is_presiding)
+               GROUP BY m.id"""):
+        if date in days:
+            days[date]["people"] = n
+    for d in days.values():
+        total = d["words"] or 1
+        for p in d["parties"]:
+            p["share"] = p["words"] / total
+        big = [p for p in d["parties"] if p["share"] >= RING_MIN_SHARE]
+        small = [p for p in d["parties"] if p["share"] < RING_MIN_SHARE]
+        ring = big + ([{"words": sum(p["words"] for p in small), "color": OTHER_COLOR}] if small else [])
+        d["ring"] = ring_segments(ring)
+        y, m, dd = (int(x) for x in d["date"].split("-"))
+        d["label"] = f"{dd} {THAI_MONTHS[m - 1]} {y + 543}"
+        d["weekday"] = THAI_WEEKDAYS[datetime.date(y, m, dd).weekday()]
+    return days
+
+
+@app.route("/meetings/")
+def meetings():
+    """Calendar of meetings: one month per card, each meeting day ringed by the parties' shares of its words."""
+    import calendar
+    days = meeting_days(db())
+    for d in days.values():  # for the list view: the day's top distinctive words, as on its own page
+        d["top_words"] = [w for w, _, _ in meeting_terms_scored(d["id"], "distinctive")[:5]]
+    most = max((d["words"] for d in days.values()), default=0) or 1
+    for d in days.values():  # calendar disc size: area in proportion to the day's words
+        d["scale"] = max(DISC_MIN_SCALE, DISC_MAX_SCALE * math.sqrt(d["words"] / most))
+    legend: dict[int, dict] = {}
+    for d in days.values():
+        for p in d["parties"]:
+            lg = legend.setdefault(p["id"], {"id": p["id"], "name": p["name"], "color": p["color"], "words": 0})
+            lg["words"] += p["words"]
+    months = []
+    cal = calendar.Calendar(firstweekday=6)  # weeks start on Sunday, as on Thai calendars
+    for ym in sorted({d[:7] for d in days}, reverse=True):  # newest month first
+        y, m = (int(x) for x in ym.split("-"))
+        weeks = [[(day, days.get(f"{ym}-{day:02d}") if day else None) for day in week]
+                 for week in cal.monthdayscalendar(y, m)]
+        months.append({"name": f"{THAI_MONTHS[m - 1]} {y + 543}", "weeks": weeks,
+                       "count": sum(1 for d in days if d.startswith(ym))})
+    dates = sorted(days)
+    return render_template("meetings.html", months=months, meetings=[days[d] for d in reversed(dates)],
+                           legend=sorted(legend.values(), key=lambda x: -x["words"]),
+                           first=dates[0] if dates else None, last=dates[-1] if dates else None,
+                           other_color=OTHER_COLOR, min_share=RING_MIN_SHARE)
+
+
+@app.route("/meeting/<date>/")
+def meeting(date: str):
+    """One day's meeting: its word cloud, the parties' shares of its words, and its transcripts."""
+    days = meeting_days(db())
+    if date not in days:
+        abort(404)
+    dates = sorted(days)
+    i = dates.index(date)
+    # one bubble per speaker (area = words that day), grouped by party; presiding officers left out, as in the pie
+    rows = db().execute(
+        """SELECT p.id, p.name, s.party_id, pa.name AS party, pa.color, SUM(s.word_count) AS words
+           FROM speeches s JOIN meetings m ON m.id = s.meeting_id JOIN persons p ON p.id = s.person_id
+           LEFT JOIN parties pa ON pa.id = s.party_id
+           WHERE m.meeting_date = ? AND NOT p.is_presiding
+           GROUP BY p.id, s.party_id ORDER BY words DESC""", (date,)).fetchall()
+    bubbles = [bubble(display_name(r["name"]), r["words"], r["color"], url_for("mp", pid=r["id"]),
+                      sub=f"{r['words']:,} คำ", group=r["party"] or "ไม่ระบุพรรค",
+                      group_color=r["color"] if text_on(r["color"]) else None,
+                      group_url=url_for("party", party_id=r["party_id"]) if r["party_id"] else None)
+               for r in rows]
+    return render_template("meeting.html", m=days[date], other_color=OTHER_COLOR, min_share=RING_MIN_SHARE,
+                           bubbles=bubbles,
+                           prev=days[dates[i - 1]] if i > 0 else None,
+                           next=days[dates[i + 1]] if i + 1 < len(dates) else None)
+
+
+@app.route("/api/meeting/<date>/speeches.json")
+def meeting_speeches(date: str):
+    """Every speech of one day's meeting, in the order spoken; same fields as a party's speeches.json."""
+    rows = db().execute(
+        """SELECT m.meeting_date AS date, m.title, s.start_clock AS clock, s.word_count AS words,
+                  s.first_clip_seq AS clip, s.first_start_sec AS start, m.phase, m.meeting_id AS meeting,
+                  s.speaker_source AS source, s.speaker_label AS label, s.person_id AS pid, p.name AS name, s.party_id AS pt, s.text,
+                  s.breaks AS b
+           FROM speeches s JOIN meetings m ON m.id = s.meeting_id LEFT JOIN persons p ON p.id = s.person_id
+           WHERE m.meeting_date = ? ORDER BY s.ordinal""", (date,)).fetchall()
+    if not rows:
+        abort(404)
+    out = []
+    for r in rows:
+        item = {k: r[k] for k in r.keys() if r[k] is not None}
+        if r["name"]:
+            item["name"] = display_name(r["name"])
+        out.append(item)
+    return jsonify(out)
+
+
+@app.route("/api/meeting/<date>/cloud-<mode>.json")
+def meeting_cloud(date: str, mode: str):
+    """mode=distinctive (default): words that set this day apart — count × log(N meetings / meetings using it);
+    mode=frequent: raw counts. Presiding officers left out, and names of people, provinces and parties."""
+    if mode not in MEETING_CLOUD_MODES:
+        abort(404)
+    mid = db().execute("SELECT id FROM meetings WHERE meeting_date = ?", (date,)).fetchone()
+    if not mid:
+        abort(404)
+    return jsonify([list(x) for x in meeting_terms_scored(mid[0], mode)[:120]])
+
+
+def meeting_terms_scored(meeting_id: int, mode: str) -> list[tuple[str, float, int]]:
+    """(word, weight, count) for one meeting's cloud, best first (see meeting_cloud)."""
+    rows = db().execute(
+        """SELECT t.id, t.term, mt.count AS n FROM meeting_terms mt JOIN terms t ON t.id = mt.term_id
+           WHERE mt.meeting_id = ? AND t.is_stopword = 0""", (meeting_id,)).fetchall()
+    ws = app.config["WORD_STATS"]
+    scored = []
+    for r in rows:
+        term = r["term"]
+        if r["n"] < 2 or term in ws["party_skip"] or not CLOUD_TERM_RE.match(term):
+            continue
+        weight = (r["n"] * math.log(ws["n_meetings"] / ws["meeting_df"].get(r["id"], 1)) if mode == "distinctive"
+                  else r["n"])
+        if weight > 0:
+            scored.append((term, round(weight, 2), r["n"]))
+    scored.sort(key=lambda x: -x[1])
+    return scored
+
+
 @app.route("/mp/<int:pid>/")
 def mp(pid: int):
     conn = db()
@@ -261,7 +453,7 @@ def mp_speeches(pid: int):
     rows = db().execute(
         """SELECT m.meeting_date AS date, m.title, s.start_clock AS clock, s.word_count AS words,
                   s.first_clip_seq AS clip, s.first_start_sec AS start, m.phase, m.meeting_id AS meeting,
-                  s.speaker_source AS source, s.speaker_label AS label, s.text, s.breaks AS b
+                  s.speaker_source AS source, s.speaker_label AS label, s.party_id AS pt, s.text, s.breaks AS b
            FROM speeches s JOIN meetings m ON m.id = s.meeting_id
            WHERE s.person_id = ? ORDER BY m.meeting_date DESC, s.ordinal""", (pid,)).fetchall()
     if not rows and not db().execute("SELECT 1 FROM persons WHERE id=?", (pid,)).fetchone():
@@ -277,7 +469,7 @@ def party_speeches(party_id: int):
     rows = conn.execute(
         """SELECT m.meeting_date AS date, m.title, s.start_clock AS clock, s.word_count AS words,
                   s.first_clip_seq AS clip, s.first_start_sec AS start, m.phase, m.meeting_id AS meeting,
-                  s.speaker_source AS source, s.speaker_label AS label, s.person_id AS pid, p.name AS name, s.text,
+                  s.speaker_source AS source, s.speaker_label AS label, s.person_id AS pid, p.name AS name, s.party_id AS pt, s.text,
                   s.breaks AS b
            FROM speeches s JOIN meetings m ON m.id = s.meeting_id JOIN persons p ON p.id = s.person_id
            WHERE s.party_id = ? ORDER BY m.meeting_date DESC, s.ordinal""", (party_id,)).fetchall()
@@ -454,7 +646,10 @@ def main() -> None:
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not RELOAD:
         print("Loading word statistics ...", flush=True)
         app.config["WORD_STATS"] = load_word_stats()
+    # Both: the env already exists (globals above), so the config key alone is ignored; without the key,
+    # app.run(debug=False) resets the env's flag to False.
     app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.jinja_env.auto_reload = True
     app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=RELOAD)
 
 

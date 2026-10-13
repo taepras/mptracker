@@ -16,6 +16,7 @@
       <nav class="nav">
         <a href="{{ url_for('index') }}" {% if request.endpoint in ('index', 'mp') %}aria-current="page"{% endif %}>ผู้อภิปราย</a>
         <a href="{{ url_for('parties') }}" {% if request.endpoint in ('parties', 'party') %}aria-current="page"{% endif %}>พรรค</a>
+        <a href="{{ url_for('meetings') }}" {% if request.endpoint == 'meetings' %}aria-current="page"{% endif %}>การประชุม</a>
       </nav>
       <p class="nav-note">
         ข้อมูลจาก <a href="https://asrs.parliament.go.th" target="_blank" rel="noopener">asrs.parliament.go.th</a> ซึ่งถอดความด้วย AI อาจมีข้อผิดพลาด

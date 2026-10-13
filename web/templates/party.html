@@ -83,7 +83,7 @@
     <button type="button" id="member-clear" class="filter-clear" hidden>ล้าง</button>
   </div>
   <form class="filters" id="sp-form" hidden>
-    <input type="search" id="sp-q" placeholder="ค้นหาในคำอภิปราย" autocomplete="off">
+    <input type="search" id="sp-q" placeholder="ค้นหาคำหรือชื่อผู้พูด" autocomplete="off">
     <select id="sp-meeting"><option value="">ทุกการประชุม</option></select>
     <button type="button" id="sp-clear" class="filter-clear" hidden>ล้าง</button>
   </form>
@@ -152,7 +152,9 @@
   // The party's transcripts download only when their tab is first opened (the file is several MB).
   const speeches = setupSpeeches(document.getElementById('list-section'),
                                  {{ url_for('party_speeches', party_id=party.id)|tojson }},
-                                 { lazy: true, speakerUrl: pid => {{ url_for('mp', pid=12345678)|tojson }}.replace('12345678', pid) });
+                                 { lazy: true, speakerUrl: pid => {{ url_for('mp', pid=12345678)|tojson }}.replace('12345678', pid),
+                                   parties: {{ party_icons()|tojson }},
+                                   meetingUrl: date => {{ url_for('meeting', date='0000-00-00')|tojson }}.replace('0000-00-00', date) });
 
   // Right-hand tabs: member table / all the party's transcripts.
   const listButtons = [...document.querySelectorAll('#list-tabs [data-tab]')];

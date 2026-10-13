@@ -1,0 +1,5 @@
+# Single words forced into the lexicon, kept whole (one per line, '#' starts a comment).
+# Unlike phrases_manual.txt these have no inner word boundaries, so search can't match a part of them.
+# Latin entries may contain spaces: their words are joined into one token ("Thai PBS" or "ThaiPBS" -> "thai pbs").
+ฮุจญาจ                       # Hajj pilgrims
+Thai PBS

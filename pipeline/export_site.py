@@ -34,14 +34,18 @@ def urls(db_path: Path) -> list[str]:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     people = [r[0] for r in conn.execute("SELECT DISTINCT person_id FROM speeches WHERE person_id IS NOT NULL ORDER BY 1")]
     parties = [r[0] for r in conn.execute("SELECT DISTINCT party_id FROM speeches WHERE party_id IS NOT NULL ORDER BY 1")]
+    dates = [r[0] for r in conn.execute("SELECT meeting_date FROM meetings ORDER BY 1")]
     conn.close()
-    out = ["/", "/parties/"]
+    out = ["/", "/parties/", "/meetings/"]
     for pid in people:
         out += [f"/mp/{pid}/", f"/api/mp/{pid}/speeches.json"]
         out += [f"/api/mp/{pid}/cloud-{m}.json" for m in webapp.MP_CLOUD_MODES]
     for party_id in parties:
         out += [f"/party/{party_id}/", f"/api/party/{party_id}/speeches.json"]
         out += [f"/api/party/{party_id}/cloud-{m}.json" for m in webapp.PARTY_CLOUD_MODES]
+    for date in dates:
+        out += [f"/meeting/{date}/", f"/api/meeting/{date}/speeches.json"]
+        out += [f"/api/meeting/{date}/cloud-{m}.json" for m in webapp.MEETING_CLOUD_MODES]
     return out
 
 

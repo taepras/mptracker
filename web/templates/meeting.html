@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pct %}
+{% block title %}การประชุม {{ m.label }} — MP Tracker{% endblock %}
+{% block content %}
+<div class="split">
+<aside class="split-chart">
+<a class="back" href="{{ url_for('meetings') }}">← ย้อนกลับ</a>
+
+<section class="profile">
+  <h1>{{ m.label }}</h1>
+  <div class="person-sub muted">{{ m.title }}{% if m.session %} ครั้งที่ {{ m.session }}{% endif %}{% if m.episode %} · {{ m.episode }}{% endif %}</div>
+  <nav class="day-nav small">
+    {% if prev %}<a href="{{ url_for('meeting', date=prev.date) }}">← {{ prev.date|thaidate }}</a>{% else %}<span></span>{% endif %}
+    <a href="{{ m.video }}" target="_blank" rel="noopener">▶ ดูวิดีโอการประชุม</a>
+    {% if next %}<a href="{{ url_for('meeting', date=next.date) }}">{{ next.date|thaidate }} →</a>{% else %}<span></span>{% endif %}
+  </nav>
+</section>
+
+<section class="cloud-card">
+  <div class="card-head">
+    <div class="seg-row">
+    <div class="seg" role="group" id="viz-tabs" aria-label="รูปแบบการแสดงผล">
+      <button type="button" data-view="distinctive" aria-pressed="true" class="on" title="คำที่วันนี้พูดมาก แต่การประชุมวันอื่นไม่ค่อยพูด">คำเด่น</button>
+      <button type="button" data-view="frequent" aria-pressed="false" title="คำที่ใช้บ่อยที่สุดในวันนี้ นับตรง ๆ">คำใช้บ่อย</button>
+      <button type="button" data-view="parties" aria-pressed="false" title="สัดส่วนจำนวนคำของแต่ละพรรค">สัดส่วนพรรค</button>
+      <button type="button" data-view="bubbles" aria-pressed="false" title="ผู้พูดแต่ละคน ขนาดตามจำนวนคำ">ผู้อภิปราย</button>
+    </div>
+    <button type="button" class="info-btn" data-dialog="cloud-help" aria-label="วิธีคำนวณ" title="วิธีคำนวณ">ⓘ</button>
+    </div>
+  </div>
+  <div class="viz-panel" id="panel-cloud">
+    <div id="cloud" class="cloud" aria-label="word cloud"></div>
+    <p class="muted small">ไม่รวมคำพูดของประธานในที่ประชุม และชื่อบุคคล จังหวัด พรรค · คลิกคำเพื่อดูคำอภิปรายที่มีคำนั้น</p>
+  </div>
+  <div class="viz-panel pie-card" id="panel-parties" hidden>
+    <div class="pie-wrap">
+    <svg class="pie" viewBox="0 0 200 200" role="img" aria-label="สัดส่วนจำนวนคำของแต่ละพรรคในวันนี้ (รายละเอียดในตาราง)">
+      <g transform="rotate(-90 100 100)">
+        {% for s in m.ring %}<circle class="slice" data-party="{{ s.id or 'other' }}" cx="100" cy="100" r="68" pathLength="100"
+          stroke="{{ s.color }}" stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}"><title>{{ s.name }} {{ pct(s.share) }}</title></circle>{% endfor %}
+      </g>
+      <text x="100" y="96" class="pie-total">{{ m.words|num }}</text>
+      <text x="100" y="118" class="pie-unit">คำ</text>
+    </svg>
+    {% set top = m.parties[0].words if m.parties else 1 %}
+    <table class="share-table">
+      <tbody>
+      {% for p in m.parties %}
+        <tr data-party="{{ p.id if p.share >= min_share else 'other' }}">
+          <td><span class="swatch" style="--pc: {{ p.color if p.share >= min_share else other_color }}"></span><a href="{{ url_for('party', party_id=p.id) }}">{{ p.name }}</a></td>
+          <td class="bar-cell"><span class="bar" style="--w: {{ (p.words / top * 100)|round(2) }}%; --pc: {{ p.color }}"></span></td>
+          <td class="r">{{ pct(p.share) }}</td>
+          <td class="r muted">{{ p.words|num }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small">ไม่รวมประธานในที่ประชุม{% if m.no_party %} และผู้พูดที่ไม่ระบุพรรค ({{ m.no_party|num }} คำ){% endif %} · พรรคที่ต่ำกว่า {{ (min_share * 100)|int }}% รวมเป็น “อื่น ๆ” สีเทาในแผนภูมิ</p>
+  </div>
+  <div class="viz-panel" id="panel-bubbles" hidden>
+    <div class="bubbles" id="bubbles"></div>
+    <script type="application/json" id="bubble-data">{{ bubbles|tojson }}</script>
+    <p class="muted small bubble-note">พื้นที่ฟอง = จำนวนคำของแต่ละคนในวันนี้ จัดกลุ่มตามพรรค (ไม่รวมประธานในที่ประชุม) · คลิกชื่อเพื่อดูคำอภิปรายของคนนั้น</p>
+  </div>
+  <dialog class="help" id="cloud-help" aria-labelledby="cloud-help-title">
+    <form method="dialog"><button class="help-close" aria-label="ปิด" title="ปิด">✕</button></form>
+    <h2 id="cloud-help-title">อ่านแผนภูมิอย่างไร</h2>
+    <dl>
+      <dt>คำเด่น</dt>
+      <dd>คำที่พูดมากในวันนี้ แต่การประชุมวันอื่นไม่ค่อยพูด จึงเห็นเรื่องเฉพาะของวันนี้ —
+        คะแนน = จำนวนครั้งที่พูดในวันนี้ × log(จำนวนวันประชุมทั้งหมด ÷ จำนวนวันที่มีคำนี้)</dd>
+      <dt>คำใช้บ่อย</dt>
+      <dd>จำนวนครั้งที่พูดในวันนี้ตรง ๆ ไม่เทียบกับวันอื่น คำทั่วไปที่พูดทุกวันจึงขึ้นมาด้วย</dd>
+      <dt>สัดส่วนพรรค</dt>
+      <dd>จำนวนคำที่ สส. แต่ละพรรคพูดในวันนี้ เทียบกับทั้งหมด พรรคที่ต่ำกว่า {{ (min_share * 100)|int }}% รวมเป็นส่วนสีเทา</dd>
+      <dt>ผู้อภิปราย</dt>
+      <dd>ฟองละหนึ่งคน พื้นที่ฟองตามจำนวนคำที่พูดในวันนี้ จัดกลุ่มตามพรรค</dd>
+    </dl>
+    <p class="muted small">ทุกแบบไม่รวมคำพูดของประธานในที่ประชุม · เมฆคำตัดชื่อบุคคล จังหวัด พรรค
+      และคำทั่วไปที่ไม่บอกเนื้อหา (เช่น ครับ ประธาน) · ขนาดคำตามคะแนน · ชี้ที่คำเพื่อดูจำนวน</p>
+  </dialog>
+</section>
+</aside>
+
+<div class="split-list">
+<dl class="stats">
+  <div><dt>จำนวนคำ</dt><dd>{{ m.words|num }}</dd><dd class="sub">ไม่รวมประธานในที่ประชุม</dd></div>
+  <div><dt>ผู้อภิปราย</dt><dd>{{ m.people }} <span class="sub">คน</span></dd><dd class="sub">ไม่รวมประธานในที่ประชุม</dd></div>
+  <div><dt>จำนวนครั้งที่พูด</dt><dd>{{ m.speeches|num }}</dd><dd class="sub">ไม่รวมประธานในที่ประชุม</dd></div>
+</dl>
+
+<section class="speeches-section" id="speeches">
+  <div class="list-head">
+  <div class="list-title" aria-hidden="true">การประชุม {{ m.label }}</div>
+  <div class="card-head">
+    <h2>คำอภิปราย <span class="muted" id="sp-total">({{ m.speeches|num }})</span></h2>
+  </div>
+  <form class="filters" id="sp-form">
+    <input type="search" id="sp-q" placeholder="ค้นหาคำหรือชื่อผู้พูดในวันนี้" autocomplete="off">
+    <select id="sp-meeting" hidden><option value="">ทุกการประชุม</option></select>
+    <button type="button" id="sp-clear" class="filter-clear" hidden>ล้าง</button>
+  </form>
+  </div>
+  <ol class="speeches" id="sp-list"><li class="muted">กำลังโหลด…</li></ol>
+  <nav class="pager" id="sp-pager" hidden></nav>
+</section>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="{{ url_for('static', filename='bubbles.js') }}"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
+<script src="{{ url_for('static', filename='cloud.js') }}"></script>
+<script src="{{ url_for('static', filename='speeches.js') }}"></script>
+<script>
+  const speeches = setupSpeeches(document.getElementById('speeches'),
+                                 {{ url_for('meeting_speeches', date=m.date)|tojson }},
+                                 { speakerUrl: pid => {{ url_for('mp', pid=12345678)|tojson }}.replace('12345678', pid),
+                                   parties: {{ party_icons()|tojson }} });
+  // clicking a speaker's bubble lists their speeches that day (search matches speaker names) instead of opening their page
+  document.getElementById('bubbles').addEventListener('bubble-click', e => {
+    e.preventDefault();
+    speeches.search(e.detail.label);
+  });
+  const cloud = setupCloud(document.getElementById('cloud'), {{ url_for('meeting_cloud', date=m.date, mode='MODE')|tojson }},
+                           { onClick: word => speeches.search(word) });
+  (() => {  // one switch for every view: two word-cloud modes, the party donut and the speaker bubbles
+    const buttons = [...document.querySelectorAll('#viz-tabs [data-view]')];
+    const panels = { cloud: document.getElementById('panel-cloud'), parties: document.getElementById('panel-parties'),
+                     bubbles: document.getElementById('panel-bubbles') };
+    function show(view) {
+      for (const b of buttons) {
+        const on = b.dataset.view === view;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on);
+      }
+      const panel = view in panels ? view : 'cloud';
+      for (const [k, el] of Object.entries(panels)) el.hidden = k !== panel;
+      PageState.set('viz', view);
+      if (panel === 'cloud') cloud.setMode(view);  // draws it: a cloud can only be sized while visible
+    }
+    buttons.forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+    const saved = PageState.get('viz', 'distinctive');
+    if (saved !== 'distinctive' && buttons.some(b => b.dataset.view === saved)) show(saved);
+  })();
+  // Pointing at a slice or a table row highlights the party in both (small parties share the grey "other" slice).
+  (() => {
+    const card = document.getElementById('panel-parties');
+    const items = [...card.querySelectorAll('[data-party]')];
+    const set = party => items.forEach(el => el.classList.toggle('dim', party !== null && el.dataset.party !== party));
+    items.forEach(el => {
+      el.addEventListener('mouseenter', () => set(el.dataset.party));
+      el.addEventListener('mouseleave', () => set(null));
+    });
+  })();
+</script>
+{% endblock %}
